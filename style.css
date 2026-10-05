@@ -91,3 +91,25 @@ table { width: 100%; border-collapse: collapse; font-size: .92rem; }
 th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 500; font-size: .8rem; }
 footer { text-align: center; padding: 8px 0 24px; }
+
+h3 { font-size: .95rem; margin: 16px 0 8px; }
+.reminder { border-color: var(--accent); }
+.reminder p { margin: 0; }
+.moods { display: flex; flex-wrap: wrap; gap: 6px; }
+.moods button { padding: 6px 10px; border-radius: 999px; font-size: .9rem; }
+.moods button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mode { display: flex; gap: 4px; margin-bottom: 12px; padding: 3px; border: 1px solid var(--border); border-radius: 12px; width: fit-content; }
+.mode button { border: none; padding: 6px 12px; }
+.mode button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.cell { flex-direction: column; line-height: 1.1; }
+.cell .mood-mark { font-size: .7rem; }
+.forecast { list-style: none; padding: 0; margin: 0; }
+.forecast li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.forecast li:last-child { border-bottom: none; }
+.forecast .day { width: 6.5em; color: var(--muted); font-size: .88rem; }
+.forecast .emoji { font-size: 1.3rem; }
+.forecast .conf { margin-left: auto; font-size: .8rem; color: var(--muted); }
+.progress { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; margin: 6px 0; }
+.progress > span { display: block; height: 100%; background: var(--accent); }
+dialog { border: 1px solid var(--border); border-radius: 16px; background: var(--card); color: var(--text); max-width: 360px; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(0, 0, 0, .4); }

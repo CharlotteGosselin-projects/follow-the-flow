@@ -34,9 +34,29 @@
       <span class="badge" title="This app makes no network requests. Data stays in this browser.">🔒 Offline · nothing sent</span>
     </header>
 
+    <section class="card reminder" id="reminder" hidden>
+      <p><strong>Time for your weekly backup.</strong> <span id="reminder-text"></span></p>
+      <div class="row">
+        <button id="reminder-export" class="primary">Export now</button>
+        <button id="reminder-snooze">Remind me tomorrow</button>
+      </div>
+    </section>
+
     <section class="card" id="summary"></section>
 
     <section class="card">
+      <h2>Mood</h2>
+      <p class="muted small">How do you feel today?</p>
+      <div class="moods" id="mood-today"></div>
+      <h3>Next 7 days</h3>
+      <div id="forecast"></div>
+    </section>
+
+    <section class="card">
+      <div class="mode" role="group" aria-label="What tapping a day does">
+        <button id="mode-period" type="button" aria-pressed="true">🩸 Period</button>
+        <button id="mode-mood" type="button" aria-pressed="false">🙂 Mood</button>
+      </div>
       <div class="cal-head">
         <button id="prev" aria-label="Previous month">‹</button>
         <h2 id="month-label"></h2>
@@ -44,7 +64,7 @@
       </div>
       <div class="cal-grid weekdays" id="weekdays"></div>
       <div class="cal-grid" id="calendar"></div>
-      <p class="muted small">Tap a day to mark or unmark it as a period day.</p>
+      <p class="muted small" id="cal-hint"></p>
       <ul class="legend">
         <li><span class="dot period"></span>Period</li>
         <li><span class="dot predicted"></span>Predicted period</li>
@@ -82,6 +102,17 @@
       Predictions are estimates based on your past cycles. They are not medical advice or contraception.
     </footer>
   </main>
+
+  <dialog id="mood-dialog">
+    <form method="dialog">
+      <h2 id="mood-dialog-title"></h2>
+      <div class="moods" id="mood-dialog-options"></div>
+      <div class="row">
+        <button value="clear" id="mood-clear">Clear mood</button>
+        <button value="cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

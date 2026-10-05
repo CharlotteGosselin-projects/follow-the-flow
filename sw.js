@@ -1,6 +1,7 @@
-// Caches the app's own static files so it works fully offline.
-// It never talks to any other server, and no user data passes through it.
-const CACHE = 'ftf-v1';
+// Makes the app work offline. Network-first for the app's own files so updates
+// arrive when online, falling back to the cache when offline. It never talks to
+// any other server, and no user data passes through it.
+const CACHE = 'ftf-v2';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {
@@ -16,5 +17,14 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request)));
+  e.respondWith(
+    fetch(e.request)
+      .then(res => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request, { ignoreSearch: true })));
 });

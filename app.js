@@ -10,11 +10,33 @@ const DEFAULT_PERIOD = 5;
 const LUTEAL_PHASE = 14;   // days from ovulation to next period (typical)
 const HISTORY_WINDOW = 6;  // number of recent cycles used for averages
 const DAY_MS = 86400000;
+const EXPORT_EVERY = 7;      // days between backup reminders
+const MOOD_MIN_SPAN = 60;    // ~2 months of mood history before forecasting
+const MOOD_MIN_ENTRIES = 15; // ...with enough entries to be meaningful
+const MOOD_LOOKBACK = 183;   // forecast uses at most the last ~6 months
+const MOODS = [
+  { id: 'happy', emoji: '😄', label: 'Happy' },
+  { id: 'calm', emoji: '😌', label: 'Calm' },
+  { id: 'tired', emoji: '😴', label: 'Tired' },
+  { id: 'sad', emoji: '😢', label: 'Sad' },
+  { id: 'irritable', emoji: '😠', label: 'Irritable' },
+  { id: 'anxious', emoji: '😰', label: 'Anxious' },
+];
+const MOOD_BY_ID = Object.fromEntries(MOODS.map(m => [m.id, m]));
 
-let state = { days: [] };  // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
+// days: sorted ISO dates ('YYYY-MM-DD') marked as period days
+// moods: { 'YYYY-MM-DD': moodId }
+// createdAt / lastExport / snoozeUntil: ISO dates driving the backup reminder
+function emptyState() {
+  return { days: [], moods: {}, createdAt: null, lastExport: null, snoozeUntil: null };
+}
+
+let state = emptyState();
 let cryptoKey = null;      // set when a passphrase protects the data
 let salt = null;
 let viewMonth = startOfMonth(todayIso());
+let tapMode = 'period';    // what tapping a calendar day does: 'period' | 'mood'
+let moodDialogDay = null;
 
 // ---------- dates (UTC math on ISO strings avoids DST/timezone drift) ----------
 
@@ -93,9 +115,61 @@ function predictions(a) {
   return { predicted, fertile, ovulation };
 }
 
+// Cycle day (1-based) of a past date, relative to the latest period start on or before it.
+function cycleDayOf(iso, ps) {
+  let start = null;
+  for (const p of ps) { if (p.start <= iso) start = p.start; else break; }
+  return start ? diffDays(start, iso) + 1 : null;
+}
+
+// Mood forecast: for each upcoming day, look at the moods logged on the same
+// cycle day (±2 days, closer days weigh more) in past cycles and pick the most
+// frequent one. Only runs once there are ~2 months of mood history.
+function moodForecast(a) {
+  const today = todayIso();
+  const entries = Object.entries(state.moods).filter(([d]) => d <= today).sort();
+  const first = entries.length ? entries[0][0] : null;
+  const span = first ? diffDays(first, today) + 1 : 0;
+  const status = { span, count: entries.length, ready: false, days: [] };
+  if (!a.last || span < MOOD_MIN_SPAN || entries.length < MOOD_MIN_ENTRIES) return status;
+
+  const L = a.cycleLen;
+  const samples = [];
+  for (const [d, mood] of entries) {
+    if (diffDays(d, today) > MOOD_LOOKBACK) continue;
+    const cd = cycleDayOf(d, a.ps);
+    if (cd) samples.push({ cd, mood });
+  }
+  if (samples.length < MOOD_MIN_ENTRIES) return status;
+  status.ready = true;
+
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(today, i);
+    const cd = ((diffDays(a.last.start, d) % L) + L) % L + 1;
+    const score = {};
+    let total = 0;
+    for (const s of samples) {
+      const raw = Math.abs(s.cd - cd);
+      const dist = Math.min(raw, Math.abs(L - raw)); // cycles wrap around
+      if (dist > 2) continue;
+      const w = 3 - dist;
+      score[s.mood] = (score[s.mood] || 0) + w;
+      total += w;
+    }
+    const best = Object.entries(score).sort((x, y) => y[1] - x[1])[0];
+    status.days.push({
+      date: d, cycleDay: cd,
+      mood: total >= 3 && best ? best[0] : null,
+      confidence: best ? Math.round(100 * best[1] / total) : 0,
+    });
+  }
+  return status;
+}
+
 // ---------- persistence ----------
 
 async function save() {
+  if (!state.createdAt) state.createdAt = todayIso();
   let payload;
   if (cryptoKey) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -129,10 +203,20 @@ async function decrypt(raw, pass) {
 function b64(bytes) { return btoa(String.fromCharCode(...bytes)); }
 function unb64(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
 
+function isIsoDate(d) { return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(toMs(d)); }
+
 function sanitize(data) {
-  const days = Array.isArray(data && data.days) ? data.days : [];
-  const valid = days.filter(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(toMs(d)));
-  return { days: [...new Set(valid)].sort() };
+  data = data || {};
+  const days = Array.isArray(data.days) ? data.days.filter(isIsoDate) : [];
+  const moods = {};
+  if (data.moods && typeof data.moods === 'object') {
+    for (const [d, m] of Object.entries(data.moods)) if (isIsoDate(d) && MOOD_BY_ID[m]) moods[d] = m;
+  }
+  const date = v => (isIsoDate(v) ? v : null);
+  return {
+    days: [...new Set(days)].sort(), moods,
+    createdAt: date(data.createdAt), lastExport: date(data.lastExport), snoozeUntil: date(data.snoozeUntil),
+  };
 }
 
 // ---------- rendering ----------
@@ -148,7 +232,9 @@ function el(tag, cls, text) {
 
 function render() {
   const a = analyse();
+  renderReminder();
   renderSummary(a);
+  renderMood(a);
   renderCalendar(a);
   renderHistory(a);
   const locked = !!cryptoKey;
@@ -195,10 +281,80 @@ function renderSummary(a) {
   box.append(big, stats, note, btn);
 }
 
+function hasData() { return state.days.length > 0 || Object.keys(state.moods).length > 0; }
+
+function renderReminder() {
+  const today = todayIso();
+  const ref = state.lastExport || state.createdAt;
+  const due = hasData() && ref && diffDays(ref, today) >= EXPORT_EVERY &&
+    !(state.snoozeUntil && today < state.snoozeUntil);
+  $('reminder').hidden = !due;
+  if (due) {
+    $('reminder-text').textContent = state.lastExport
+      ? `Your last export was ${diffDays(state.lastExport, today)} days ago (${fmt(state.lastExport)}).`
+      : "You haven't exported a backup yet.";
+  }
+}
+
+function moodButtons(container, selected, onPick) {
+  container.replaceChildren();
+  for (const m of MOODS) {
+    const b = el('button', null, `${m.emoji} ${m.label}`);
+    b.type = 'button';
+    b.value = m.id;
+    b.setAttribute('aria-pressed', String(selected === m.id));
+    b.addEventListener('click', e => onPick(m.id, e));
+    container.append(b);
+  }
+}
+
+function renderMood(a) {
+  const today = todayIso();
+  moodButtons($('mood-today'), state.moods[today], id => setMood(today, state.moods[today] === id ? null : id));
+
+  const box = $('forecast');
+  box.replaceChildren();
+  const f = moodForecast(a);
+  if (!f.ready) {
+    const pct = Math.min(100, Math.round(100 * Math.min(f.span / MOOD_MIN_SPAN, f.count / MOOD_MIN_ENTRIES)));
+    const bar = el('div', 'progress');
+    const fill = el('span');
+    fill.style.width = pct + '%';
+    bar.append(fill);
+    const needs = [];
+    if (f.span < MOOD_MIN_SPAN) needs.push(`${MOOD_MIN_SPAN - f.span} more days of history`);
+    if (f.count < MOOD_MIN_ENTRIES) needs.push(`${MOOD_MIN_ENTRIES - f.count} more mood entries`);
+    if (!a.last) needs.push('at least one logged period');
+    box.append(
+      el('p', 'muted small', 'Your mood forecast unlocks after about 2 months of mood logging, so it can learn how you usually feel at each point of your cycle.'),
+      bar,
+      el('p', 'muted small', needs.length ? `Still needed: ${needs.join(', ')}.` : 'Almost there. Keep logging moods after your periods.'));
+    return;
+  }
+  const list = el('ul', 'forecast');
+  f.days.forEach((d, i) => {
+    const li = el('li');
+    const m = d.mood && MOOD_BY_ID[d.mood];
+    li.append(
+      el('span', 'day', i === 0 ? 'Today' : fmt(d.date, { weekday: 'short', day: 'numeric' })),
+      el('span', 'emoji', m ? m.emoji : '·'),
+      el('span', null, m ? m.label : 'Not enough data'),
+      el('span', 'conf', m ? `${d.confidence}% · day ${d.cycleDay}` : `day ${d.cycleDay}`));
+    list.append(li);
+  });
+  box.append(list, el('p', 'muted small', 'Based on the moods you logged on the same days of past cycles. Just a pattern, not a certainty.'));
+}
+
 function renderCalendar(a) {
   const { predicted, fertile, ovulation } = predictions(a);
   const marked = new Set(state.days);
   const today = todayIso();
+
+  $('mode-period').setAttribute('aria-pressed', String(tapMode === 'period'));
+  $('mode-mood').setAttribute('aria-pressed', String(tapMode === 'mood'));
+  $('cal-hint').textContent = tapMode === 'period'
+    ? 'Tap a day to mark or unmark it as a period day.'
+    : 'Tap a day to log or change your mood.';
 
   $('month-label').textContent = fmt(viewMonth, { month: 'long', year: 'numeric' });
 
@@ -210,8 +366,11 @@ function renderCalendar(a) {
 
   const nextMonth = addMonths(viewMonth, 1);
   for (let d = viewMonth; d < nextMonth; d = addDays(d, 1)) {
-    const b = el('button', 'cell', String(Number(d.slice(8))));
+    const b = el('button', 'cell');
     b.type = 'button';
+    b.append(el('span', null, String(Number(d.slice(8)))));
+    const mood = MOOD_BY_ID[state.moods[d]];
+    if (mood) b.append(el('span', 'mood-mark', mood.emoji));
     if (marked.has(d)) b.classList.add('period');
     else if (predicted.has(d)) b.classList.add('predicted');
     else if (ovulation.has(d)) b.classList.add('ovulation');
@@ -219,9 +378,9 @@ function renderCalendar(a) {
     if (d === today) b.classList.add('today');
     if (d > today) b.classList.add('future');
     b.setAttribute('aria-label', fmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) +
-      (marked.has(d) ? ', period' : ''));
-    b.setAttribute('aria-pressed', String(marked.has(d)));
-    b.addEventListener('click', () => toggleDay(d));
+      (marked.has(d) ? ', period' : '') + (mood ? `, mood ${mood.label}` : ''));
+    if (tapMode === 'period') b.setAttribute('aria-pressed', String(marked.has(d)));
+    b.addEventListener('click', () => (tapMode === 'period' ? toggleDay(d) : openMoodDialog(d)));
     grid.append(b);
   }
 }
@@ -260,8 +419,29 @@ async function toggleDay(d) {
   render();
 }
 
-function exportBackup() {
-  const blob = new Blob([JSON.stringify({ app: 'follow-the-flow', version: 1, ...state }, null, 2)],
+async function setMood(d, id) {
+  if (id) state.moods[d] = id;
+  else delete state.moods[d];
+  await save();
+  render();
+}
+
+function openMoodDialog(d) {
+  if (d > todayIso()) { alert("You can only log moods for today or past days."); return; }
+  moodDialogDay = d;
+  $('mood-dialog-title').textContent = fmt(d, { weekday: 'long', day: 'numeric', month: 'long' });
+  moodButtons($('mood-dialog-options'), state.moods[d], id => {
+    setMood(d, id);
+    $('mood-dialog').close();
+  });
+  $('mood-clear').hidden = !state.moods[d];
+  $('mood-dialog').returnValue = ''; // close() without a value keeps the previous one
+  $('mood-dialog').showModal();
+}
+
+async function exportBackup() {
+  const blob = new Blob([JSON.stringify(
+    { app: 'follow-the-flow', version: 2, days: state.days, moods: state.moods }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = el('a');
@@ -269,13 +449,25 @@ function exportBackup() {
   link.download = `follow-the-flow-${todayIso()}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  state.lastExport = todayIso();
+  state.snoozeUntil = null;
+  await save();
+  render();
+}
+
+async function snoozeReminder() {
+  state.snoozeUntil = addDays(todayIso(), 1);
+  await save();
+  render();
 }
 
 async function importBackup(file) {
   try {
     const incoming = sanitize(JSON.parse(await file.text()));
-    if (!confirm(`Import ${incoming.days.length} period days? They will be merged with your current data.`)) return;
+    const moodCount = Object.keys(incoming.moods).length;
+    if (!confirm(`Import ${incoming.days.length} period days and ${moodCount} moods? They will be merged with your current data.`)) return;
     state.days = [...new Set([...state.days, ...incoming.days])].sort();
+    state.moods = { ...incoming.moods, ...state.moods }; // keep the mood already on this device if both have one
     await save();
     render();
   } catch {
@@ -305,14 +497,14 @@ async function removePassphrase() {
 async function wipe() {
   if (!confirm('Delete all your data from this device? This cannot be undone.')) return;
   localStorage.removeItem(STORAGE_KEY);
-  state = { days: [] };
+  state = emptyState();
   cryptoKey = null;
   salt = null;
   render();
 }
 
 function lockNow() {
-  state = { days: [] };
+  state = emptyState();
   cryptoKey = null;
   salt = null;
   showLock();
@@ -328,6 +520,7 @@ function showLock() {
 function showApp() {
   $('lock').hidden = true;
   $('app').hidden = false;
+  if (hasData() && !state.createdAt) save(); // start the backup-reminder clock for older data
   render();
 }
 
@@ -346,6 +539,14 @@ function init() {
   $('remove-pass').addEventListener('click', removePassphrase);
   $('lock-now').addEventListener('click', lockNow);
   $('wipe').addEventListener('click', wipe);
+  $('reminder-export').addEventListener('click', exportBackup);
+  $('reminder-snooze').addEventListener('click', snoozeReminder);
+  $('mode-period').addEventListener('click', () => { tapMode = 'period'; render(); });
+  $('mode-mood').addEventListener('click', () => { tapMode = 'mood'; render(); });
+  $('mood-dialog').addEventListener('close', () => {
+    if ($('mood-dialog').returnValue === 'clear' && moodDialogDay) setMood(moodDialogDay, null);
+    moodDialogDay = null;
+  });
 
   $('unlock-form').addEventListener('submit', async e => {
     e.preventDefault();
