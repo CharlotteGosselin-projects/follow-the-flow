@@ -9,6 +9,7 @@
   --predicted: #f6c9d5;
   --fertile: #d6ecf7;
   --ovulation: #7fbfe0;
+  --sleep: #6f4fc2;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -22,6 +23,7 @@
     --predicted: #5c2c3d;
     --fertile: #1f3a4a;
     --ovulation: #3f86ad;
+    --sleep: #9278d4;
   }
 }
 * { box-sizing: border-box; }
@@ -101,7 +103,7 @@ h3 { font-size: .95rem; margin: 16px 0 8px; }
 .mode { display: flex; gap: 4px; margin-bottom: 12px; padding: 3px; border: 1px solid var(--border); border-radius: 12px; width: fit-content; }
 .mode button { border: none; padding: 6px 12px; }
 .mode button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-.cell { flex-direction: column; line-height: 1.1; }
+.cell { flex-direction: column; line-height: 1.1; position: relative; }
 .cell .mood-mark { font-size: .7rem; }
 .forecast { list-style: none; padding: 0; margin: 0; }
 .forecast li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
@@ -116,3 +118,22 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .forecast .labels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: .9rem; }
 .forecast .likely, .forecast .conf, .forecast .day { white-space: nowrap; }
 .forecast .day { flex-shrink: 0; }
+
+/* Sleep: a corner marker on calendar days. Filled = insomnia, ring = poor sleep,
+   so the two differ by shape as well as color. */
+.cell.sleep-insomnia::after, .cell.sleep-poor::after {
+  content: ""; position: absolute; top: 2px; right: 2px; width: 9px; height: 9px;
+  border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 2px var(--card);
+}
+.cell.sleep-insomnia::after { background: var(--sleep); }
+.cell.sleep-poor::after { border: 2px solid var(--sleep); background: var(--card); }
+.dot.sleep-insomnia { background: var(--sleep); }
+.dot.sleep-poor { border: 2px solid var(--sleep); box-sizing: border-box; }
+
+.phases { list-style: none; padding: 0; margin: 8px 0; }
+.phases li { display: grid; grid-template-columns: 9.5em 1fr 3.2em; align-items: center; gap: 8px; padding: 4px 0; font-size: .88rem; }
+.phases .track { height: 10px; }
+.phases .fill { display: block; height: 100%; min-width: 2px; background: var(--sleep); border-radius: 0 4px 4px 0; }
+.phases .value { text-align: right; font-variant-numeric: tabular-nums; }
+.phases li.top .name { font-weight: 600; }
+dialog h3 { margin: 12px 0 6px; }

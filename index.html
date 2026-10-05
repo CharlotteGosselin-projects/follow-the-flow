@@ -53,9 +53,16 @@
     </section>
 
     <section class="card">
+      <h2>Sleep</h2>
+      <p class="muted small">How did you sleep last night? Only log the bad nights: nights you don't log count as normal.</p>
+      <div class="moods" id="sleep-today"></div>
+      <div id="sleep-stats"></div>
+    </section>
+
+    <section class="card">
       <div class="mode" role="group" aria-label="What tapping a day does">
         <button id="mode-period" type="button" aria-pressed="true">🩸 Period</button>
-        <button id="mode-mood" type="button" aria-pressed="false">🙂 Mood</button>
+        <button id="mode-mood" type="button" aria-pressed="false">🙂 Mood &amp; sleep</button>
       </div>
       <div class="cal-head">
         <button id="prev" aria-label="Previous month">‹</button>
@@ -70,6 +77,8 @@
         <li><span class="dot predicted"></span>Predicted period</li>
         <li><span class="dot fertile"></span>Fertile window (estimate)</li>
         <li><span class="dot ovulation"></span>Ovulation (estimate)</li>
+        <li><span class="dot sleep-poor"></span>Poor sleep</li>
+        <li><span class="dot sleep-insomnia"></span>Insomnia</li>
       </ul>
     </section>
 
@@ -106,7 +115,10 @@
   <dialog id="mood-dialog">
     <form method="dialog">
       <h2 id="mood-dialog-title"></h2>
+      <h3>Mood</h3>
       <div class="moods" id="mood-dialog-options"></div>
+      <h3>Sleep the night before</h3>
+      <div class="moods" id="sleep-dialog-options"></div>
       <div class="row">
         <button value="done" class="primary">Done</button>
         <button value="clear" id="mood-clear">Clear all</button>

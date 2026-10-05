@@ -23,12 +23,28 @@ const MOODS = [
   { id: 'anxious', emoji: '😰', label: 'Anxious' },
 ];
 const MOOD_BY_ID = Object.fromEntries(MOODS.map(m => [m.id, m]));
+// Sleep is logged on the morning after: the date is the day you woke up.
+const SLEEP = [
+  { id: 'poor', emoji: '🥱', label: 'Poor sleep' },
+  { id: 'insomnia', emoji: '🦉', label: 'Insomnia' },
+];
+const SLEEP_BY_ID = Object.fromEntries(SLEEP.map(s => [s.id, s]));
+const SLEEP_MIN_SPAN = 60;   // ~2 months of sleep tracking before showing patterns
+const SLEEP_MIN_BAD = 3;     // ...with a few bad nights to compare
+const PHASES = [
+  { id: 'period', label: 'During your period', when: 'during your period' },
+  { id: 'follicular', label: 'After your period', when: 'in the days after your period' },
+  { id: 'ovulation', label: 'Around ovulation', when: 'around ovulation' },
+  { id: 'luteal', label: 'Second half of cycle', when: 'in the second half of your cycle' },
+  { id: 'premenstrual', label: 'Week before period', when: 'in the week before your period' },
+];
 
 // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
 // moods: { 'YYYY-MM-DD': [moodId, ...] } (several moods per day allowed)
+// sleep: { 'YYYY-MM-DD': 'poor' | 'insomnia' } (only bad nights are logged)
 // createdAt / lastExport / snoozeUntil: ISO dates driving the backup reminder
 function emptyState() {
-  return { days: [], moods: {}, createdAt: null, lastExport: null, snoozeUntil: null };
+  return { days: [], moods: {}, sleep: {}, createdAt: null, lastExport: null, snoozeUntil: null };
 }
 
 let state = emptyState();
@@ -146,7 +162,7 @@ function moodForecast(a) {
 
   for (let i = 0; i < 7; i++) {
     const d = addDays(today, i);
-    const cd = ((diffDays(a.last.start, d) % L) + L) % L + 1;
+    const cd = futureCycleDay(d, a);
     const score = {};
     let total = 0;
     for (const s of samples) {
@@ -167,6 +183,53 @@ function moodForecast(a) {
       moods: total >= 3 ? (likely.length ? likely : ranked.slice(0, 1)) : [],
     });
   }
+  return status;
+}
+
+// Which part of the cycle a cycle day falls in, using the average cycle and period length.
+function phaseOf(cd, a) {
+  const L = a.cycleLen, ov = L - LUTEAL_PHASE;
+  if (cd <= a.periodLen) return 'period';
+  if (cd > L - 7) return 'premenstrual'; // also covers days past a late period
+  if (Math.abs(cd - ov) <= 2) return 'ovulation';
+  return cd < ov ? 'follicular' : 'luteal';
+}
+
+// Predicted cycle day for a date on or after the last period start.
+function futureCycleDay(d, a) {
+  const L = a.cycleLen;
+  return ((diffDays(a.last.start, d) % L) + L) % L + 1;
+}
+
+// Sleep pattern: for each phase, the share of tracked nights that were bad.
+// Tracking starts at the first logged bad night; unlogged nights count as normal.
+function sleepPattern(a) {
+  const today = todayIso();
+  const logged = Object.keys(state.sleep).filter(d => d <= today).sort();
+  const first = logged[0] || null;
+  const span = first ? diffDays(first, today) + 1 : 0;
+  const status = { span, bad: logged.length, ready: false, phases: [], top: null };
+  if (!a.last || span < SLEEP_MIN_SPAN || logged.length < SLEEP_MIN_BAD) return status;
+
+  const nights = {}, bad = {};
+  let total = 0, totalBad = 0;
+  for (let d = first; d <= today; d = addDays(d, 1)) {
+    const cd = cycleDayOf(d, a.ps);
+    if (!cd) continue;
+    const ph = phaseOf(cd, a);
+    nights[ph] = (nights[ph] || 0) + 1;
+    total++;
+    if (state.sleep[d]) { bad[ph] = (bad[ph] || 0) + 1; totalBad++; }
+  }
+  if (!totalBad) return status;
+  status.ready = true;
+  status.phases = PHASES.filter(p => nights[p.id]).map(p => ({
+    ...p, nights: nights[p.id], bad: bad[p.id] || 0, rate: (bad[p.id] || 0) / nights[p.id],
+  }));
+  const overall = totalBad / total;
+  const best = [...status.phases].sort((x, y) => y.rate - x.rate)[0];
+  // Only call out a phase when it clearly stands out from the rest of the cycle.
+  if (best && best.rate >= 1.5 * overall && best.bad >= 2) status.top = best;
   return status;
 }
 
@@ -221,9 +284,13 @@ function sanitize(data) {
       if (isIsoDate(d) && unique.length) moods[d] = unique;
     }
   }
+  const sleep = {};
+  if (data.sleep && typeof data.sleep === 'object') {
+    for (const [d, v] of Object.entries(data.sleep)) if (isIsoDate(d) && SLEEP_BY_ID[v]) sleep[d] = v;
+  }
   const date = v => (isIsoDate(v) ? v : null);
   return {
-    days: [...new Set(days)].sort(), moods,
+    days: [...new Set(days)].sort(), moods, sleep,
     createdAt: date(data.createdAt), lastExport: date(data.lastExport), snoozeUntil: date(data.snoozeUntil),
   };
 }
@@ -244,6 +311,7 @@ function render() {
   renderReminder();
   renderSummary(a);
   renderMood(a);
+  renderSleep(a);
   renderCalendar(a);
   renderHistory(a);
   const locked = !!cryptoKey;
@@ -290,7 +358,9 @@ function renderSummary(a) {
   box.append(big, stats, note, btn);
 }
 
-function hasData() { return state.days.length > 0 || Object.keys(state.moods).length > 0; }
+function hasData() {
+  return state.days.length > 0 || Object.keys(state.moods).length > 0 || Object.keys(state.sleep).length > 0;
+}
 
 function renderReminder() {
   const today = todayIso();
@@ -355,6 +425,84 @@ function renderMood(a) {
   box.append(list, el('p', 'muted small', 'Percentages show how often you felt each mood on the same days of past cycles. Just a pattern, not a certainty.'));
 }
 
+function sleepButtons(container, d) {
+  container.replaceChildren();
+  for (const s of SLEEP) {
+    const b = el('button', null, `${s.emoji} ${s.label}`);
+    b.type = 'button';
+    b.value = s.id;
+    b.setAttribute('aria-pressed', String(state.sleep[d] === s.id));
+    b.addEventListener('click', () => setSleep(d, state.sleep[d] === s.id ? null : s.id));
+    container.append(b);
+  }
+}
+
+function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
+function renderSleep(a) {
+  const today = todayIso();
+  sleepButtons($('sleep-today'), today);
+
+  const box = $('sleep-stats');
+  box.replaceChildren();
+  const recent = Object.entries(state.sleep).filter(([d]) => d <= today && diffDays(d, today) < 30);
+  const insomnia = recent.filter(([, v]) => v === 'insomnia').length;
+  const poor = recent.length - insomnia;
+  box.append(el('h3', null, 'Last 30 days'),
+    el('p', null, recent.length
+      ? `${plural(insomnia, 'night')} of insomnia · ${plural(poor, 'poor night')}`
+      : 'No bad nights logged.'));
+
+  box.append(el('h3', null, 'Across your cycle'));
+  const f = sleepPattern(a);
+  if (!f.ready) {
+    const needs = [];
+    if (f.span < SLEEP_MIN_SPAN) needs.push(`${SLEEP_MIN_SPAN - f.span} more days of tracking`);
+    if (f.bad < SLEEP_MIN_BAD) needs.push(`${SLEEP_MIN_BAD - f.bad} more bad nights logged`);
+    if (!a.last) needs.push('at least one logged period');
+    const bar = el('div', 'progress');
+    const fill = el('span');
+    fill.style.width = Math.min(100, Math.round(100 * f.span / SLEEP_MIN_SPAN)) + '%';
+    bar.append(fill);
+    box.append(
+      el('p', 'muted small', 'After about 2 months of tracking, this shows when in your cycle bad nights tend to happen.'),
+      bar,
+      el('p', 'muted small', needs.length ? `Still needed: ${needs.join(', ')}.` : 'Almost there.'));
+    return;
+  }
+
+  const max = Math.max(...f.phases.map(p => p.rate)) || 1;
+  const list = el('ul', 'phases');
+  list.setAttribute('aria-label', 'Share of nights with poor sleep or insomnia, by cycle phase');
+  for (const p of f.phases) {
+    const li = el('li', f.top && f.top.id === p.id ? 'top' : null);
+    li.title = `${p.label}: ${p.bad} bad of ${plural(p.nights, 'night')}`;
+    const track = el('span', 'track');
+    const fill = el('span', 'fill');
+    fill.style.width = (100 * p.rate / max) + '%';
+    track.append(fill);
+    li.append(el('span', 'name', p.label), track, el('span', 'value', `${Math.round(100 * p.rate)}%`));
+    list.append(li);
+  }
+  box.append(list);
+
+  if (f.top) {
+    let note = `Bad nights are most common for you ${f.top.when}.`;
+    // Heads-up if that phase is coming up in the next week.
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(today, i);
+      if (phaseOf(futureCycleDay(d, a), a) === f.top.id) {
+        note += i === 0 ? " You're in that phase now." : ` That phase starts around ${fmt(d, { weekday: 'short', day: 'numeric', month: 'short' })}.`;
+        break;
+      }
+    }
+    box.append(el('p', null, note));
+  } else {
+    box.append(el('p', 'muted small', "Your bad nights don't seem tied to one part of your cycle."));
+  }
+  box.append(el('p', 'muted small', 'Percentages show the share of nights in each phase with poor sleep or insomnia.'));
+}
+
 function renderCalendar(a) {
   const { predicted, fertile, ovulation } = predictions(a);
   const marked = new Set(state.days);
@@ -364,7 +512,7 @@ function renderCalendar(a) {
   $('mode-mood').setAttribute('aria-pressed', String(tapMode === 'mood'));
   $('cal-hint').textContent = tapMode === 'period'
     ? 'Tap a day to mark or unmark it as a period day.'
-    : 'Tap a day to log or change its moods.';
+    : 'Tap a day to log its moods and how you slept the night before.';
 
   $('month-label').textContent = fmt(viewMonth, { month: 'long', year: 'numeric' });
 
@@ -388,10 +536,12 @@ function renderCalendar(a) {
     else if (predicted.has(d)) b.classList.add('predicted');
     else if (ovulation.has(d)) b.classList.add('ovulation');
     else if (fertile.has(d)) b.classList.add('fertile');
+    if (state.sleep[d]) b.classList.add(`sleep-${state.sleep[d]}`);
     if (d === today) b.classList.add('today');
     if (d > today) b.classList.add('future');
     b.setAttribute('aria-label', fmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) +
-      (marked.has(d) ? ', period' : '') + (dayMoods.length ? `, mood ${dayMoods.map(m => m.label).join(', ')}` : ''));
+      (marked.has(d) ? ', period' : '') + (dayMoods.length ? `, mood ${dayMoods.map(m => m.label).join(', ')}` : '') +
+      (state.sleep[d] ? `, ${SLEEP_BY_ID[state.sleep[d]].label.toLowerCase()}` : ''));
     if (tapMode === 'period') b.setAttribute('aria-pressed', String(marked.has(d)));
     b.addEventListener('click', () => (tapMode === 'period' ? toggleDay(d) : openMoodDialog(d)));
     grid.append(b);
@@ -446,13 +596,22 @@ async function setMoods(d, ids) {
   if (moodDialogDay === d) refreshMoodDialog();
 }
 
+async function setSleep(d, id) {
+  if (id) state.sleep[d] = id;
+  else delete state.sleep[d];
+  await save();
+  render();
+  if (moodDialogDay === d) refreshMoodDialog();
+}
+
 function refreshMoodDialog() {
   moodButtons($('mood-dialog-options'), moodDialogDay);
-  $('mood-clear').hidden = !state.moods[moodDialogDay];
+  sleepButtons($('sleep-dialog-options'), moodDialogDay);
+  $('mood-clear').hidden = !state.moods[moodDialogDay] && !state.sleep[moodDialogDay];
 }
 
 function openMoodDialog(d) {
-  if (d > todayIso()) { alert("You can only log moods for today or past days."); return; }
+  if (d > todayIso()) { alert('You can only log moods and sleep for today or past days.'); return; }
   moodDialogDay = d;
   $('mood-dialog-title').textContent = fmt(d, { weekday: 'long', day: 'numeric', month: 'long' });
   refreshMoodDialog();
@@ -462,7 +621,7 @@ function openMoodDialog(d) {
 
 async function exportBackup() {
   const blob = new Blob([JSON.stringify(
-    { app: 'follow-the-flow', version: 3, days: state.days, moods: state.moods }, null, 2)],
+    { app: 'follow-the-flow', version: 4, days: state.days, moods: state.moods, sleep: state.sleep }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = el('a');
@@ -486,11 +645,16 @@ async function importBackup(file) {
   try {
     const incoming = sanitize(JSON.parse(await file.text()));
     const moodCount = Object.keys(incoming.moods).length;
-    if (!confirm(`Import ${incoming.days.length} period days and moods for ${moodCount} days? They will be merged with your current data.`)) return;
+    const sleepCount = Object.keys(incoming.sleep).length;
+    if (!confirm(`Import ${incoming.days.length} period days, moods for ${moodCount} days and ${sleepCount} bad nights? They will be merged with your current data.`)) return;
     state.days = [...new Set([...state.days, ...incoming.days])].sort();
     for (const [d, ids] of Object.entries(incoming.moods)) {
       const merged = new Set([...(state.moods[d] || []), ...ids]);
       state.moods[d] = MOODS.map(m => m.id).filter(id => merged.has(id));
+    }
+    for (const [d, v] of Object.entries(incoming.sleep)) {
+      // If both copies logged the night, keep the worse one.
+      if (state.sleep[d] !== 'insomnia') state.sleep[d] = v;
     }
     await save();
     render();
@@ -570,7 +734,10 @@ function init() {
   $('mood-dialog').addEventListener('close', () => {
     const d = moodDialogDay;
     moodDialogDay = null;
-    if ($('mood-dialog').returnValue === 'clear' && d) setMoods(d, []);
+    if ($('mood-dialog').returnValue === 'clear' && d) {
+      delete state.sleep[d];
+      setMoods(d, []);
+    }
   });
 
   $('unlock-form').addEventListener('submit', async e => {
