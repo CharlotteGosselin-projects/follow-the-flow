@@ -42,10 +42,10 @@ python3 -m http.server 8000
 
 1. The repo must be **public** (or you need GitHub Pro for Pages on a private repo).
    Making the code public is safe: the code contains no personal data, and your data never leaves your device.
-2. **Settings → Pages → Build and deployment → Source: "Deploy from a branch"**, pick this branch and `/ (root)`, then **Save**.
+2. **Settings → Pages → Build and deployment → Source: "Deploy from a branch"**, pick `master` and `/ (root)`, then **Save**.
 3. After a minute it's live at `https://<your-username>.github.io/follow-the-flow/`.
 4. On your phone, open that link and use **Add to Home Screen** to install it like an app. It then works offline.
 
-Every push to that branch redeploys automatically.
+Every push to `master` redeploys automatically.
 
 To use it on your phone, you can also host it on any static host (GitHub Pages, Netlify, Cloudflare Pages). The host only serves the files. It never sees your data, because the app never sends any.
