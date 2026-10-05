@@ -597,7 +597,20 @@ function init() {
   // Offline support: cache the app's own files. The service worker only ever
   // serves this app's static files and never contacts any other host.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      // An installed app can stay open for days: look for a new version whenever it comes back to the foreground.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
+    // When a new version takes over, reload once so the page runs the new code.
+    // Data is saved on every change, so nothing is lost.
+    if (navigator.serviceWorker.controller) {
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!reloaded) { reloaded = true; location.reload(); }
+      });
+    }
   }
 }
 
