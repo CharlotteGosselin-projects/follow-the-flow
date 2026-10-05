@@ -22,8 +22,8 @@ A private menstrual cycle tracker that runs entirely in your browser. **No data 
 - Average cycle and period length from your last 6 cycles (outliers under 15 or over 60 days are ignored)
 - Next-period prediction, plus estimated fertile window and ovulation (14 days before the next period)
 - Cycle history table
-- **Mood tracking**: log how you feel today in one tap, or any past day (switch the calendar to "Mood" mode)
-- **Mood forecast** for the next 7 days, unlocked after ~2 months of mood logging (60 days of history and at least 15 entries). For each upcoming day it looks at the moods you logged on the same cycle day (±2 days, nearer days count more) over the last ~6 months and shows the most frequent one with a confidence %. Everything is computed on your device.
+- **Mood tracking**: log one or more moods for today in one tap each, or any past day (switch the calendar to "Mood" mode)
+- **Mood forecast** for the next 7 days, unlocked after ~2 months of mood logging (60 days of history and at least 15 entries). For each upcoming day it looks at the moods you logged on the same cycle day (±2 days, nearer days count more) over the last ~6 months and shows how often each mood came up (moods seen on 40% or more of those days, up to 3). Everything is computed on your device.
 - **Weekly backup reminder**: a banner appears when your last export is 7 or more days old ("Export now" or "Remind me tomorrow"). It's an in-app banner because real push notifications would need a server.
 - Light/dark mode
 

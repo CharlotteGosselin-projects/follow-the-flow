@@ -25,7 +25,7 @@ const MOODS = [
 const MOOD_BY_ID = Object.fromEntries(MOODS.map(m => [m.id, m]));
 
 // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
-// moods: { 'YYYY-MM-DD': moodId }
+// moods: { 'YYYY-MM-DD': [moodId, ...] } (several moods per day allowed)
 // createdAt / lastExport / snoozeUntil: ISO dates driving the backup reminder
 function emptyState() {
   return { days: [], moods: {}, createdAt: null, lastExport: null, snoozeUntil: null };
@@ -122,9 +122,10 @@ function cycleDayOf(iso, ps) {
   return start ? diffDays(start, iso) + 1 : null;
 }
 
-// Mood forecast: for each upcoming day, look at the moods logged on the same
-// cycle day (±2 days, closer days weigh more) in past cycles and pick the most
-// frequent one. Only runs once there are ~2 months of mood history.
+// Mood forecast: for each upcoming day, look at the days logged on the same
+// cycle day (±2 days, closer days weigh more) in past cycles and estimate how
+// often each mood showed up. Since a day can have several moods, each mood gets
+// its own likelihood. Only runs once there are ~2 months of mood history.
 function moodForecast(a) {
   const today = todayIso();
   const entries = Object.entries(state.moods).filter(([d]) => d <= today).sort();
@@ -135,10 +136,10 @@ function moodForecast(a) {
 
   const L = a.cycleLen;
   const samples = [];
-  for (const [d, mood] of entries) {
+  for (const [d, moods] of entries) {
     if (diffDays(d, today) > MOOD_LOOKBACK) continue;
     const cd = cycleDayOf(d, a.ps);
-    if (cd) samples.push({ cd, mood });
+    if (cd) samples.push({ cd, moods });
   }
   if (samples.length < MOOD_MIN_ENTRIES) return status;
   status.ready = true;
@@ -153,14 +154,17 @@ function moodForecast(a) {
       const dist = Math.min(raw, Math.abs(L - raw)); // cycles wrap around
       if (dist > 2) continue;
       const w = 3 - dist;
-      score[s.mood] = (score[s.mood] || 0) + w;
+      for (const m of s.moods) score[m] = (score[m] || 0) + w;
       total += w;
     }
-    const best = Object.entries(score).sort((x, y) => y[1] - x[1])[0];
+    // Moods present on at least 40% of comparable days (top 3), or the single most likely one.
+    const ranked = Object.entries(score)
+      .map(([id, w]) => ({ id, pct: Math.round(100 * w / total) }))
+      .sort((x, y) => y.pct - x.pct);
+    const likely = ranked.filter(r => r.pct >= 40).slice(0, 3);
     status.days.push({
       date: d, cycleDay: cd,
-      mood: total >= 3 && best ? best[0] : null,
-      confidence: best ? Math.round(100 * best[1] / total) : 0,
+      moods: total >= 3 ? (likely.length ? likely : ranked.slice(0, 1)) : [],
     });
   }
   return status;
@@ -210,7 +214,12 @@ function sanitize(data) {
   const days = Array.isArray(data.days) ? data.days.filter(isIsoDate) : [];
   const moods = {};
   if (data.moods && typeof data.moods === 'object') {
-    for (const [d, m] of Object.entries(data.moods)) if (isIsoDate(d) && MOOD_BY_ID[m]) moods[d] = m;
+    for (const [d, v] of Object.entries(data.moods)) {
+      // Older versions stored a single mood id per day.
+      const ids = (Array.isArray(v) ? v : [v]).filter(m => MOOD_BY_ID[m]);
+      const unique = MOODS.map(m => m.id).filter(id => ids.includes(id));
+      if (isIsoDate(d) && unique.length) moods[d] = unique;
+    }
   }
   const date = v => (isIsoDate(v) ? v : null);
   return {
@@ -296,21 +305,22 @@ function renderReminder() {
   }
 }
 
-function moodButtons(container, selected, onPick) {
+function moodButtons(container, d) {
   container.replaceChildren();
+  const selected = state.moods[d] || [];
   for (const m of MOODS) {
     const b = el('button', null, `${m.emoji} ${m.label}`);
     b.type = 'button';
     b.value = m.id;
-    b.setAttribute('aria-pressed', String(selected === m.id));
-    b.addEventListener('click', e => onPick(m.id, e));
+    b.setAttribute('aria-pressed', String(selected.includes(m.id)));
+    b.addEventListener('click', () => toggleMood(d, m.id));
     container.append(b);
   }
 }
 
 function renderMood(a) {
   const today = todayIso();
-  moodButtons($('mood-today'), state.moods[today], id => setMood(today, state.moods[today] === id ? null : id));
+  moodButtons($('mood-today'), today);
 
   const box = $('forecast');
   box.replaceChildren();
@@ -326,7 +336,7 @@ function renderMood(a) {
     if (f.count < MOOD_MIN_ENTRIES) needs.push(`${MOOD_MIN_ENTRIES - f.count} more mood entries`);
     if (!a.last) needs.push('at least one logged period');
     box.append(
-      el('p', 'muted small', 'Your mood forecast unlocks after about 2 months of mood logging, so it can learn how you usually feel at each point of your cycle.'),
+      el('p', 'muted small', 'Pick as many moods as fit. Your mood forecast unlocks after about 2 months of mood logging, so it can learn how you usually feel at each point of your cycle.'),
       bar,
       el('p', 'muted small', needs.length ? `Still needed: ${needs.join(', ')}.` : 'Almost there. Keep logging moods after your periods.'));
     return;
@@ -334,15 +344,15 @@ function renderMood(a) {
   const list = el('ul', 'forecast');
   f.days.forEach((d, i) => {
     const li = el('li');
-    const m = d.mood && MOOD_BY_ID[d.mood];
+    const ms = d.moods.map(r => ({ ...MOOD_BY_ID[r.id], pct: r.pct }));
     li.append(
       el('span', 'day', i === 0 ? 'Today' : fmt(d.date, { weekday: 'short', day: 'numeric' })),
-      el('span', 'emoji', m ? m.emoji : '·'),
-      el('span', null, m ? m.label : 'Not enough data'),
-      el('span', 'conf', m ? `${d.confidence}% · day ${d.cycleDay}` : `day ${d.cycleDay}`));
+      el('span', 'labels', ms.length ? '' : 'Not enough data'),
+      el('span', 'conf', `day ${d.cycleDay}`));
+    for (const m of ms) li.querySelector('.labels').append(el('span', 'likely', `${m.emoji} ${m.label} ${m.pct}%`));
     list.append(li);
   });
-  box.append(list, el('p', 'muted small', 'Based on the moods you logged on the same days of past cycles. Just a pattern, not a certainty.'));
+  box.append(list, el('p', 'muted small', 'Percentages show how often you felt each mood on the same days of past cycles. Just a pattern, not a certainty.'));
 }
 
 function renderCalendar(a) {
@@ -354,7 +364,7 @@ function renderCalendar(a) {
   $('mode-mood').setAttribute('aria-pressed', String(tapMode === 'mood'));
   $('cal-hint').textContent = tapMode === 'period'
     ? 'Tap a day to mark or unmark it as a period day.'
-    : 'Tap a day to log or change your mood.';
+    : 'Tap a day to log or change its moods.';
 
   $('month-label').textContent = fmt(viewMonth, { month: 'long', year: 'numeric' });
 
@@ -369,8 +379,11 @@ function renderCalendar(a) {
     const b = el('button', 'cell');
     b.type = 'button';
     b.append(el('span', null, String(Number(d.slice(8)))));
-    const mood = MOOD_BY_ID[state.moods[d]];
-    if (mood) b.append(el('span', 'mood-mark', mood.emoji));
+    const dayMoods = (state.moods[d] || []).map(id => MOOD_BY_ID[id]);
+    if (dayMoods.length) {
+      // Room for two emoji in a calendar cell; '+' hints at more.
+      b.append(el('span', 'mood-mark', dayMoods.slice(0, 2).map(m => m.emoji).join('') + (dayMoods.length > 2 ? '+' : '')));
+    }
     if (marked.has(d)) b.classList.add('period');
     else if (predicted.has(d)) b.classList.add('predicted');
     else if (ovulation.has(d)) b.classList.add('ovulation');
@@ -378,7 +391,7 @@ function renderCalendar(a) {
     if (d === today) b.classList.add('today');
     if (d > today) b.classList.add('future');
     b.setAttribute('aria-label', fmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) +
-      (marked.has(d) ? ', period' : '') + (mood ? `, mood ${mood.label}` : ''));
+      (marked.has(d) ? ', period' : '') + (dayMoods.length ? `, mood ${dayMoods.map(m => m.label).join(', ')}` : ''));
     if (tapMode === 'period') b.setAttribute('aria-pressed', String(marked.has(d)));
     b.addEventListener('click', () => (tapMode === 'period' ? toggleDay(d) : openMoodDialog(d)));
     grid.append(b);
@@ -419,29 +432,37 @@ async function toggleDay(d) {
   render();
 }
 
-async function setMood(d, id) {
-  if (id) state.moods[d] = id;
+async function toggleMood(d, id) {
+  const current = state.moods[d] || [];
+  const next = current.includes(id) ? current.filter(m => m !== id) : [...current, id];
+  await setMoods(d, MOODS.map(m => m.id).filter(m => next.includes(m)));
+}
+
+async function setMoods(d, ids) {
+  if (ids.length) state.moods[d] = ids;
   else delete state.moods[d];
   await save();
   render();
+  if (moodDialogDay === d) refreshMoodDialog();
+}
+
+function refreshMoodDialog() {
+  moodButtons($('mood-dialog-options'), moodDialogDay);
+  $('mood-clear').hidden = !state.moods[moodDialogDay];
 }
 
 function openMoodDialog(d) {
   if (d > todayIso()) { alert("You can only log moods for today or past days."); return; }
   moodDialogDay = d;
   $('mood-dialog-title').textContent = fmt(d, { weekday: 'long', day: 'numeric', month: 'long' });
-  moodButtons($('mood-dialog-options'), state.moods[d], id => {
-    setMood(d, id);
-    $('mood-dialog').close();
-  });
-  $('mood-clear').hidden = !state.moods[d];
+  refreshMoodDialog();
   $('mood-dialog').returnValue = ''; // close() without a value keeps the previous one
   $('mood-dialog').showModal();
 }
 
 async function exportBackup() {
   const blob = new Blob([JSON.stringify(
-    { app: 'follow-the-flow', version: 2, days: state.days, moods: state.moods }, null, 2)],
+    { app: 'follow-the-flow', version: 3, days: state.days, moods: state.moods }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = el('a');
@@ -465,9 +486,12 @@ async function importBackup(file) {
   try {
     const incoming = sanitize(JSON.parse(await file.text()));
     const moodCount = Object.keys(incoming.moods).length;
-    if (!confirm(`Import ${incoming.days.length} period days and ${moodCount} moods? They will be merged with your current data.`)) return;
+    if (!confirm(`Import ${incoming.days.length} period days and moods for ${moodCount} days? They will be merged with your current data.`)) return;
     state.days = [...new Set([...state.days, ...incoming.days])].sort();
-    state.moods = { ...incoming.moods, ...state.moods }; // keep the mood already on this device if both have one
+    for (const [d, ids] of Object.entries(incoming.moods)) {
+      const merged = new Set([...(state.moods[d] || []), ...ids]);
+      state.moods[d] = MOODS.map(m => m.id).filter(id => merged.has(id));
+    }
     await save();
     render();
   } catch {
@@ -544,8 +568,9 @@ function init() {
   $('mode-period').addEventListener('click', () => { tapMode = 'period'; render(); });
   $('mode-mood').addEventListener('click', () => { tapMode = 'mood'; render(); });
   $('mood-dialog').addEventListener('close', () => {
-    if ($('mood-dialog').returnValue === 'clear' && moodDialogDay) setMood(moodDialogDay, null);
+    const d = moodDialogDay;
     moodDialogDay = null;
+    if ($('mood-dialog').returnValue === 'clear' && d) setMoods(d, []);
   });
 
   $('unlock-form').addEventListener('submit', async e => {
