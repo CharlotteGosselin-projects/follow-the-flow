@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Privacy guarantee enforced by the browser: no network requests of any kind
+       (fetch / XHR / WebSocket / beacons) and no third-party resources. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'none'; img-src 'self' data:; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#b23a5b">
+  <title>Follow the Flow</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Lock screen (only shown when a passphrase is set) -->
+  <section id="lock" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Follow the Flow</h1>
+      <p class="muted">Your data is encrypted on this device. Enter your passphrase to unlock it.</p>
+      <form id="unlock-form">
+        <input id="unlock-pass" type="password" autocomplete="current-password" placeholder="Passphrase" required>
+        <button type="submit" class="primary">Unlock</button>
+      </form>
+      <p id="unlock-error" class="error" hidden>Wrong passphrase.</p>
+    </div>
+  </section>
+
+  <main id="app" hidden>
+    <header class="top">
+      <h1>Follow the Flow</h1>
+      <span class="badge" title="This app makes no network requests. Data stays in this browser.">🔒 Offline · nothing sent</span>
+    </header>
+
+    <section class="card" id="summary"></section>
+
+    <section class="card">
+      <div class="cal-head">
+        <button id="prev" aria-label="Previous month">‹</button>
+        <h2 id="month-label"></h2>
+        <button id="next" aria-label="Next month">›</button>
+      </div>
+      <div class="cal-grid weekdays" id="weekdays"></div>
+      <div class="cal-grid" id="calendar"></div>
+      <p class="muted small">Tap a day to mark or unmark it as a period day.</p>
+      <ul class="legend">
+        <li><span class="dot period"></span>Period</li>
+        <li><span class="dot predicted"></span>Predicted period</li>
+        <li><span class="dot fertile"></span>Fertile window (estimate)</li>
+        <li><span class="dot ovulation"></span>Ovulation (estimate)</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>History</h2>
+      <div id="history"></div>
+    </section>
+
+    <section class="card">
+      <h2>Your data</h2>
+      <p class="muted small">
+        Everything is saved only in this browser on this device. Nothing is ever uploaded.
+        If you clear your browser data or change devices it's gone, so export a backup file from time to time.
+      </p>
+      <div class="row">
+        <button id="export">Export backup</button>
+        <label class="button">Import backup<input id="import" type="file" accept=".json,application/json" hidden></label>
+      </div>
+      <div class="row">
+        <button id="set-pass">Set passphrase</button>
+        <button id="remove-pass" hidden>Remove passphrase</button>
+        <button id="lock-now" hidden>Lock now</button>
+      </div>
+      <div class="row">
+        <button id="wipe" class="danger">Delete all data</button>
+      </div>
+    </section>
+
+    <footer class="muted small">
+      Predictions are estimates based on your past cycles. They are not medical advice or contraception.
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

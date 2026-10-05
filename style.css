@@ -1,0 +1,93 @@
+:root {
+  --bg: #fbf7f8;
+  --card: #ffffff;
+  --text: #2a1f24;
+  --muted: #7a6a71;
+  --border: #eadde2;
+  --accent: #b23a5b;
+  --period: #d64b6f;
+  --predicted: #f6c9d5;
+  --fertile: #d6ecf7;
+  --ovulation: #7fbfe0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17121a;
+    --card: #221a25;
+    --text: #f2e9ee;
+    --muted: #a8959f;
+    --border: #3a2e3d;
+    --accent: #e7769a;
+    --period: #d64b6f;
+    --predicted: #5c2c3d;
+    --fertile: #1f3a4a;
+    --ovulation: #3f86ad;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main, .screen { max-width: 560px; margin: 0 auto; padding: 16px; }
+.screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+h1 { font-size: 1.35rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 0 0 12px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
+.badge { font-size: .78rem; padding: 4px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+.narrow { width: 100%; max-width: 360px; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.error { color: var(--period); }
+.big { font-size: 1.5rem; font-weight: 650; margin-bottom: 12px; }
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 16px; margin: 0 0 8px; }
+.stats dt { font-size: .8rem; color: var(--muted); }
+.stats dd { margin: 0 0 4px; font-weight: 600; }
+
+button, .button {
+  font: inherit; color: var(--text); background: transparent;
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; cursor: pointer;
+  display: inline-block;
+}
+button:hover, .button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--period); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+input[type=password] {
+  width: 100%; font: inherit; padding: 10px 12px; margin: 8px 0;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+}
+form button { width: 100%; }
+
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-head h2 { margin: 0; }
+.cal-head button { border: none; font-size: 1.5rem; line-height: 1; padding: 4px 12px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.weekdays span { text-align: center; font-size: .75rem; color: var(--muted); padding-bottom: 4px; }
+.cell {
+  aspect-ratio: 1; padding: 0; border-radius: 50%; border: 2px solid transparent;
+  display: flex; align-items: center; justify-content: center; font-size: .9rem;
+}
+.cell.empty { visibility: hidden; }
+.cell.future { color: var(--muted); }
+.cell.fertile { background: var(--fertile); color: var(--text); }
+.cell.ovulation { background: var(--ovulation); color: #fff; }
+.cell.predicted { background: var(--predicted); color: var(--text); border-style: dashed; border-color: var(--period); }
+.cell.period { background: var(--period); color: #fff; font-weight: 600; }
+.cell.today { border-color: var(--text); border-style: solid; }
+
+.legend { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .8rem; color: var(--muted); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.dot.period { background: var(--period); }
+.dot.predicted { background: var(--predicted); border: 1px dashed var(--period); }
+.dot.fertile { background: var(--fertile); }
+.dot.ovulation { background: var(--ovulation); }
+
+table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 500; font-size: .8rem; }
+footer { text-align: center; padding: 8px 0 24px; }

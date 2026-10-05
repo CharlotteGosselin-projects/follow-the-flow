@@ -1,0 +1,11 @@
+{
+  "name": "Follow the Flow",
+  "short_name": "Flow",
+  "description": "Private, offline menstrual cycle tracker. No data ever leaves your device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf7f8",
+  "theme_color": "#b23a5b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
