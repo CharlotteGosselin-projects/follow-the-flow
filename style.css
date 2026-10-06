@@ -68,7 +68,8 @@ form button { width: 100%; }
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .cal-head h2 { margin: 0; }
 .cal-head button { border: none; font-size: 1.5rem; line-height: 1; padding: 4px 12px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+/* minmax(0, 1fr): columns stay equal even when a day holds wide content like emoji */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .weekdays span { text-align: center; font-size: .75rem; color: var(--muted); padding-bottom: 4px; }
 .cell {
   aspect-ratio: 1; padding: 0; border-radius: 50%; border: 2px solid transparent;
@@ -103,8 +104,13 @@ h3 { font-size: .95rem; margin: 16px 0 8px; }
 .mode { display: flex; gap: 4px; margin-bottom: 12px; padding: 3px; border: 1px solid var(--border); border-radius: 12px; width: fit-content; }
 .mode button { border: none; padding: 6px 12px; }
 .mode button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-.cell { flex-direction: column; line-height: 1.1; position: relative; }
-.cell .mood-mark { font-size: .7rem; }
+.cell { line-height: 1.1; position: relative; min-width: 0; padding-bottom: 11px; }
+/* Every day reserves a strip at the bottom (padding above) where mood emoji sit,
+   out of the layout flow, so day numbers stay aligned whether or not a day has moods. */
+.cell .mood-mark {
+  position: absolute; left: 0; right: 0; bottom: 2px;
+  font-size: .6rem; line-height: 1; text-align: center; white-space: nowrap; overflow: hidden; pointer-events: none;
+}
 .forecast { list-style: none; padding: 0; margin: 0; }
 .forecast li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .forecast li:last-child { border-bottom: none; }
