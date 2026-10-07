@@ -52,6 +52,8 @@ const HABITS = [
   { id: 'alcohol', emoji: '🍷', label: 'Alcohol', group: 'daily',
     levels: ['1 drink', '2 drinks', '3 drinks', '4 drinks', '5+ drinks'], heavy: { level: 3, label: '3+ drinks' } },
   { id: 'stress', emoji: '😣', label: 'Stress', group: 'mind', levels: ['some', 'high'] },
+  { id: 'meetings', emoji: '📅', label: 'Meetings', group: 'mind',
+    levels: ['some', 'a lot', 'all day'], heavy: { level: 2, label: 'a lot or all day' } },
   { id: 'social', emoji: '👯', label: 'Social time', group: 'mind' },
   { id: 'alone', emoji: '🛋️', label: 'Alone time', group: 'mind' },
   { id: 'cramps', emoji: '😖', label: 'Cramps', group: 'body', levels: ['mild', 'strong'] },
