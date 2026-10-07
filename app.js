@@ -47,8 +47,10 @@ const HABIT_GROUPS = [
 ];
 const HABITS = [
   { id: 'exercise', emoji: '🏃', label: 'Exercise', group: 'daily', levels: ['light', 'intense'] },
-  { id: 'caffeine', emoji: '☕', label: 'Caffeine', group: 'daily', levels: ['1 cup', '2 cups', '3+ cups'] },
-  { id: 'alcohol', emoji: '🍷', label: 'Alcohol', group: 'daily', levels: ['1 drink', '2 drinks', '3+ drinks'] },
+  { id: 'caffeine', emoji: '☕', label: 'Caffeine', group: 'daily',
+    levels: ['1 cup', '2 cups', '3 cups', '4 cups', '5+ cups'], heavy: { level: 3, label: '3+ cups' } },
+  { id: 'alcohol', emoji: '🍷', label: 'Alcohol', group: 'daily',
+    levels: ['1 drink', '2 drinks', '3 drinks', '4 drinks', '5+ drinks'], heavy: { level: 3, label: '3+ drinks' } },
   { id: 'stress', emoji: '😣', label: 'Stress', group: 'mind', levels: ['some', 'high'] },
   { id: 'social', emoji: '👯', label: 'Social time', group: 'mind' },
   { id: 'alone', emoji: '🛋️', label: 'Alone time', group: 'mind' },
@@ -272,14 +274,16 @@ function activeHabits() {
 }
 
 // What the analysis compares: each habit at any level, and levelled habits
-// also at their top level (e.g. 3+ cups of coffee).
+// also at a high level: their `heavy` threshold (e.g. 3+ cups of coffee, so
+// there are enough days to compare) or else their top level.
 function habitFactors() {
   const out = [];
   for (const h of activeHabits()) {
     out.push({ label: `${h.emoji} ${h.label}`, since: h.since, top: false, has: d => !!state.habits[d][h.id] });
     if (h.levels) {
-      const top = h.levels.length;
-      out.push({ label: `${h.emoji} ${h.label} (${h.levels[top - 1]})`, since: h.since, top: true,
+      const top = h.heavy ? h.heavy.level : h.levels.length;
+      const topLabel = h.heavy ? h.heavy.label : h.levels[top - 1];
+      out.push({ label: `${h.emoji} ${h.label} (${topLabel})`, since: h.since, top: true,
         has: d => (state.habits[d][h.id] || 0) >= top });
     }
   }
