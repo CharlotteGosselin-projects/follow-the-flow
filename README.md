@@ -11,7 +11,7 @@ A private menstrual cycle tracker that runs entirely in your browser. **No data 
 - **Local storage only.** Period days are saved in this browser's `localStorage`.
 - **Optional passphrase.** With a passphrase set, data is encrypted on the device (AES-GCM 256, PBKDF2-SHA256 key, 310k iterations). There's no recovery if you forget it.
 - **Works offline.** A service worker caches the app's own files, and the app can be installed to your home screen (PWA).
-- **Backups are files you own.** Export/Import creates and reads a JSON file (period days, moods and sleep) on your device. Use it to move to another phone or keep a backup.
+- **Backups are files you own.** Export/Import creates and reads a JSON file (period days, moods, sleep and habits) on your device. Use it to move to another phone or keep a backup.
 
 > ⚠️ Clearing your browser's site data deletes your history. Export a backup regularly.
 > Exported backup files are **not** encrypted, so keep them somewhere safe.
@@ -25,6 +25,8 @@ A private menstrual cycle tracker that runs entirely in your browser. **No data 
 - **Mood tracking**: log one or more moods for today in one tap each, or any past day (switch the calendar to "Mood" mode)
 - **Mood forecast** for the next 7 days, unlocked after ~2 months of mood logging (60 days of history and at least 15 entries). For each upcoming day it looks at the moods you logged on the same cycle day (±2 days, nearer days count more) over the last ~6 months and shows how often each mood came up (moods seen on 40% or more of those days, up to 3). Everything is computed on your device.
 - **Sleep / insomnia tracking**: each morning, log a bad night as 🥱 Poor sleep or 🦉 Insomnia (nights you don't log count as normal). Past nights can be logged from the calendar in "Mood & sleep" mode, and the calendar marks them (ring = poor sleep, filled dot = insomnia). The app shows your last 30 days and, after ~2 months of tracking, the share of bad nights in each part of your cycle. It also points out the phase where they're most common and gives a heads-up when that phase is coming.
+- **Habit tracking**: tap what happened each day: 🏃 Exercise, ☕ Caffeine, 🍷 Alcohol, 😣 Stress, 👯 Social time, 🛋️ Alone time, 😖 Cramps, 🤕 Headache, 🤢 Digestion issues. Tap again for a level (e.g. ☕ 1 / 2 / 3+ cups). Hide the ones you don't need and add your own. If nothing applies, tap "None of these" so the day still counts; days you don't log are left out of the analysis. Past days can be logged from the calendar.
+- **What affects your sleep and mood**: after ~2 months of habit logging, the app lists habits linked to bad nights (the night after a habit day) or to particular moods (the same day), and the part of your cycle where each habit is most common. Each habit is compared with days without it *in the same cycle phases*, so something that just happens more before your period isn't blamed for PMS. A link is only shown when there are at least 8 days with and 8 without the habit, and the difference is clear (15+ points and 1.5× either way). These are patterns in your own data, not proof of cause.
 - **Weekly backup reminder**: a banner appears when your last export is 7 or more days old ("Export now" or "Remind me tomorrow"). It's an in-app banner because real push notifications would need a server.
 - Light/dark mode
 

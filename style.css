@@ -143,3 +143,23 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .phases .value { text-align: right; font-variant-numeric: tabular-nums; }
 .phases li.top .name { font-weight: 600; }
 dialog h3 { margin: 12px 0 6px; }
+
+/* Habits */
+.group-label { margin: 10px 0 4px; }
+.none-row { margin-top: 10px; }
+.habit-settings { margin-top: 12px; }
+.habit-settings summary { cursor: pointer; color: var(--accent); }
+.habit-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.habit-row button { padding: 4px 10px; font-size: .85rem; }
+.habit-add { display: flex; gap: 6px; margin-top: 8px; }
+.habit-add button { width: auto; }
+.habit-add input {
+  font: inherit; padding: 8px 10px; min-width: 0;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+}
+#habit-emoji { width: 3.2em; text-align: center; }
+#habit-name { flex: 1; }
+.habit-row input { accent-color: var(--accent); }
+.findings { list-style: none; padding: 0; margin: 0; font-size: .9rem; }
+.findings li { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.findings li:last-child { border-bottom: none; }

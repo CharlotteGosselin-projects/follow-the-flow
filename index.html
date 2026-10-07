@@ -60,9 +60,26 @@
     </section>
 
     <section class="card">
+      <h2>Habits</h2>
+      <p class="muted small">What happened today? Tap again to go up a level. If nothing applies, tap “None of these” so the day still counts: days you don't log are left out of the analysis.</p>
+      <div id="habit-today"></div>
+      <details class="habit-settings">
+        <summary class="small">Choose habits</summary>
+        <p class="muted small">Untick habits you don't want to track. Habits you add only count from the day you add them.</p>
+        <div id="habit-manage"></div>
+        <form id="habit-add" class="habit-add">
+          <input id="habit-emoji" type="text" maxlength="16" placeholder="⭐" aria-label="Emoji (optional)">
+          <input id="habit-name" type="text" maxlength="30" placeholder="New habit" aria-label="Habit name" required>
+          <button type="submit">Add</button>
+        </form>
+      </details>
+      <div id="habit-stats"></div>
+    </section>
+
+    <section class="card">
       <div class="mode" role="group" aria-label="What tapping a day does">
         <button id="mode-period" type="button" aria-pressed="true">🩸 Period</button>
-        <button id="mode-mood" type="button" aria-pressed="false">🙂 Mood &amp; sleep</button>
+        <button id="mode-mood" type="button" aria-pressed="false">🙂 Mood, sleep &amp; habits</button>
       </div>
       <div class="cal-head">
         <button id="prev" aria-label="Previous month">‹</button>
@@ -119,6 +136,8 @@
       <div class="moods" id="mood-dialog-options"></div>
       <h3>Sleep the night before</h3>
       <div class="moods" id="sleep-dialog-options"></div>
+      <h3>Habits</h3>
+      <div id="habit-dialog-options"></div>
       <div class="row">
         <button value="done" class="primary">Done</button>
         <button value="clear" id="mood-clear">Clear all</button>
