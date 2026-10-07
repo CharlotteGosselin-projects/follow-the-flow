@@ -38,13 +38,41 @@ const PHASES = [
   { id: 'luteal', label: 'Second half of cycle', when: 'in the second half of your cycle' },
   { id: 'premenstrual', label: 'Week before period', when: 'in the week before your period' },
 ];
+// Habits are tapped once per day; habits with levels cycle through them on each tap.
+const HABIT_GROUPS = [
+  { id: 'daily', label: 'Daily habits' },
+  { id: 'mind', label: 'Mind & social' },
+  { id: 'body', label: 'Body' },
+  { id: 'custom', label: 'Your own' },
+];
+const HABITS = [
+  { id: 'exercise', emoji: '🏃', label: 'Exercise', group: 'daily', levels: ['light', 'intense'] },
+  { id: 'caffeine', emoji: '☕', label: 'Caffeine', group: 'daily', levels: ['1 cup', '2 cups', '3+ cups'] },
+  { id: 'alcohol', emoji: '🍷', label: 'Alcohol', group: 'daily', levels: ['1 drink', '2 drinks', '3+ drinks'] },
+  { id: 'stress', emoji: '😣', label: 'Stress', group: 'mind', levels: ['some', 'high'] },
+  { id: 'social', emoji: '👯', label: 'Social time', group: 'mind' },
+  { id: 'alone', emoji: '🛋️', label: 'Alone time', group: 'mind' },
+  { id: 'cramps', emoji: '😖', label: 'Cramps', group: 'body', levels: ['mild', 'strong'] },
+  { id: 'headache', emoji: '🤕', label: 'Headache', group: 'body' },
+  { id: 'digestion', emoji: '🤢', label: 'Digestion issues', group: 'body' },
+];
+const HABIT_MIN_SPAN = 60;   // ~2 months of habit logging before showing links
+const HABIT_MIN_DAYS = 8;    // days with and without a habit needed to compare them
+const HABIT_SHOW = 6;        // most findings listed per section
 
 // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
 // moods: { 'YYYY-MM-DD': [moodId, ...] } (several moods per day allowed)
 // sleep: { 'YYYY-MM-DD': 'poor' | 'insomnia' } (only bad nights are logged)
+// habits: { 'YYYY-MM-DD': { habitId: level } } (level 1..n; {} = "none of these").
+//   Only days present here count in the analysis, so forgotten days don't skew it.
+// customHabits: [{ id, emoji, label, since }] habits added by the user
+// hiddenHabits: [habitId] habits the user doesn't track
 // createdAt / lastExport / snoozeUntil: ISO dates driving the backup reminder
 function emptyState() {
-  return { days: [], moods: {}, sleep: {}, createdAt: null, lastExport: null, snoozeUntil: null };
+  return {
+    days: [], moods: {}, sleep: {}, habits: {}, customHabits: [], hiddenHabits: [],
+    createdAt: null, lastExport: null, snoozeUntil: null,
+  };
 }
 
 let state = emptyState();
@@ -233,6 +261,121 @@ function sleepPattern(a) {
   return status;
 }
 
+// ---------- habits ----------
+
+function allHabits() {
+  return [...HABITS, ...state.customHabits.map(c => ({ ...c, group: 'custom' }))];
+}
+
+function activeHabits() {
+  return allHabits().filter(h => !state.hiddenHabits.includes(h.id));
+}
+
+// What the analysis compares: each habit at any level, and levelled habits
+// also at their top level (e.g. 3+ cups of coffee).
+function habitFactors() {
+  const out = [];
+  for (const h of activeHabits()) {
+    out.push({ label: `${h.emoji} ${h.label}`, since: h.since, top: false, has: d => !!state.habits[d][h.id] });
+    if (h.levels) {
+      const top = h.levels.length;
+      out.push({ label: `${h.emoji} ${h.label} (${h.levels[top - 1]})`, since: h.since, top: true,
+        has: d => (state.habits[d][h.id] || 0) >= top });
+    }
+  }
+  return out;
+}
+
+// How often `outcome` happens on days with a factor, compared with what days
+// without it in the same cycle phases would predict. Comparing within phases
+// keeps a habit that simply clusters in one phase (say, coffee in the week
+// before a period) from being blamed for that phase's effect.
+function compareByPhase(samples, has, outcome) {
+  const by = {};
+  for (const s of samples) {
+    const g = by[s.phase] || (by[s.phase] = { w: 0, wHit: 0, o: 0, oHit: 0 });
+    const hit = outcome(s.day);
+    if (has(s.day)) { g.w++; if (hit) g.wHit++; } else { g.o++; if (hit) g.oHit++; }
+  }
+  let n = 0, hits = 0, expected = 0, others = 0;
+  for (const g of Object.values(by)) {
+    if (!g.w || !g.o) continue; // no comparison possible in this phase
+    n += g.w; hits += g.wHit; others += g.o;
+    expected += g.w * g.oHit / g.o;
+  }
+  if (n < HABIT_MIN_DAYS || others < HABIT_MIN_DAYS) return null;
+  return { n, observed: hits / n, expected: expected / n };
+}
+
+// Only clear differences are worth showing.
+function notable(r) {
+  if (!r) return false;
+  return Math.abs(r.observed - r.expected) >= 0.15 &&
+    (r.observed >= 1.5 * r.expected || r.observed <= r.expected / 1.5);
+}
+
+// The phase where a factor is clearly most common, if any.
+function phaseSpread(samples, has) {
+  const days = {}, hits = {};
+  let n = 0;
+  for (const s of samples) {
+    days[s.phase] = (days[s.phase] || 0) + 1;
+    if (has(s.day)) { hits[s.phase] = (hits[s.phase] || 0) + 1; n++; }
+  }
+  if (n < HABIT_MIN_DAYS) return null;
+  const overall = n / samples.length;
+  const best = PHASES.filter(p => days[p.id] >= 5)
+    .map(p => ({ phase: p, count: hits[p.id] || 0, rate: (hits[p.id] || 0) / days[p.id] }))
+    .sort((x, y) => y.rate - x.rate)[0];
+  if (!best || best.count < 3 || best.rate < 1.5 * overall) return null;
+  return { phase: best.phase, rate: best.rate, overall };
+}
+
+// Links between habits and sleep, mood and cycle phase. Uses only days where
+// habits were logged, and starts after ~2 months of logging.
+function habitInsights(a) {
+  const today = todayIso();
+  const logged = Object.keys(state.habits).filter(d => d <= today).sort();
+  const span = logged.length ? diffDays(logged[0], today) + 1 : 0;
+  const status = { span, count: logged.length, ready: false, sleep: [], mood: [], cycle: [] };
+  if (!a.last || span < HABIT_MIN_SPAN) return status;
+  status.ready = true;
+
+  const samples = [];
+  for (const d of logged) {
+    const cd = cycleDayOf(d, a.ps);
+    if (cd) samples.push({ day: d, phase: phaseOf(cd, a) });
+  }
+  // A day's habits go with the night after it. Sleep is logged on the morning
+  // after, from the first bad night logged; unlogged nights count as normal.
+  const firstSleep = Object.keys(state.sleep).sort()[0];
+  const sleepSamples = firstSleep
+    ? samples.filter(s => { const n = addDays(s.day, 1); return n >= firstSleep && n < today; })
+    : [];
+  const badNight = d => !!state.sleep[addDays(d, 1)];
+  const moodSamples = samples.filter(s => state.moods[s.day]);
+
+  for (const f of habitFactors()) {
+    // A habit added later only counts from the day it was added.
+    const own = list => (f.since ? list.filter(s => s.day >= f.since) : list);
+    const r = compareByPhase(own(sleepSamples), f.has, badNight);
+    if (notable(r)) status.sleep.push({ f, ...r });
+    for (const m of MOODS) {
+      const rm = compareByPhase(own(moodSamples), f.has, d => state.moods[d].includes(m.id));
+      if (notable(rm)) status.mood.push({ f, mood: m, ...rm });
+    }
+    if (!f.top) {
+      const c = phaseSpread(own(samples), f.has);
+      if (c) status.cycle.push({ f, ...c });
+    }
+  }
+  const gap = r => Math.abs(r.observed - r.expected);
+  status.sleep.sort((x, y) => gap(y) - gap(x));
+  status.mood.sort((x, y) => gap(y) - gap(x));
+  status.cycle.sort((x, y) => y.rate / y.overall - x.rate / x.overall);
+  return status;
+}
+
 // ---------- persistence ----------
 
 async function save() {
@@ -289,10 +432,42 @@ function sanitize(data) {
     for (const [d, v] of Object.entries(data.sleep)) if (isIsoDate(d) && SLEEP_BY_ID[v]) sleep[d] = v;
   }
   const date = v => (isIsoDate(v) ? v : null);
+  const customHabits = [];
+  if (Array.isArray(data.customHabits)) {
+    for (const c of data.customHabits) {
+      if (!c || typeof c.id !== 'string' || !/^c[a-z0-9]{1,16}$/.test(c.id)) continue;
+      const label = typeof c.label === 'string' ? c.label.trim().slice(0, 30) : '';
+      if (label && !customHabits.some(x => x.id === c.id)) {
+        customHabits.push({ id: c.id, emoji: firstGrapheme(c.emoji) || '⭐', label, since: date(c.since) });
+      }
+    }
+  }
+  const maxLevel = new Map([...HABITS, ...customHabits].map(h => [h.id, h.levels ? h.levels.length : 1]));
+  const habits = {};
+  if (data.habits && typeof data.habits === 'object') {
+    for (const [d, v] of Object.entries(data.habits)) {
+      if (!isIsoDate(d) || !v || typeof v !== 'object' || Array.isArray(v)) continue;
+      const day = {};
+      for (const [id, lv] of Object.entries(v)) {
+        if (Number.isInteger(lv) && lv >= 1 && lv <= (maxLevel.get(id) || 0)) day[id] = lv;
+      }
+      // An empty day means "none of these"; a day whose entries were all invalid is dropped.
+      if (Object.keys(day).length || !Object.keys(v).length) habits[d] = day;
+    }
+  }
+  const hiddenHabits = Array.isArray(data.hiddenHabits) ? [...new Set(data.hiddenHabits.filter(id => maxLevel.has(id)))] : [];
   return {
-    days: [...new Set(days)].sort(), moods, sleep,
+    days: [...new Set(days)].sort(), moods, sleep, habits, customHabits, hiddenHabits,
     createdAt: date(data.createdAt), lastExport: date(data.lastExport), snoozeUntil: date(data.snoozeUntil),
   };
+}
+
+// First user-visible character (keeps multi-part emoji like 👩‍💻 whole).
+function firstGrapheme(s) {
+  s = typeof s === 'string' ? s.trim() : '';
+  if (!s) return '';
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) return new Intl.Segmenter().segment(s)[Symbol.iterator]().next().value.segment.slice(0, 16);
+  return [...s][0];
 }
 
 // ---------- rendering ----------
@@ -312,6 +487,7 @@ function render() {
   renderSummary(a);
   renderMood(a);
   renderSleep(a);
+  renderHabits(a);
   renderCalendar(a);
   renderHistory(a);
   const locked = !!cryptoKey;
@@ -359,7 +535,8 @@ function renderSummary(a) {
 }
 
 function hasData() {
-  return state.days.length > 0 || Object.keys(state.moods).length > 0 || Object.keys(state.sleep).length > 0;
+  return state.days.length > 0 || Object.keys(state.moods).length > 0 || Object.keys(state.sleep).length > 0 ||
+    Object.keys(state.habits).length > 0;
 }
 
 function renderReminder() {
@@ -503,6 +680,104 @@ function renderSleep(a) {
   box.append(el('p', 'muted small', 'Percentages show the share of nights in each phase with poor sleep or insomnia.'));
 }
 
+function habitButtons(container, d) {
+  container.replaceChildren();
+  const day = state.habits[d];
+  const shown = activeHabits();
+  for (const g of HABIT_GROUPS) {
+    const hs = shown.filter(h => h.group === g.id);
+    if (!hs.length) continue;
+    const wrap = el('div', 'moods');
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-label', g.label);
+    for (const h of hs) {
+      const level = (day && day[h.id]) || 0;
+      const max = h.levels ? h.levels.length : 1;
+      const b = el('button', null, `${h.emoji} ${h.label}` + (level && h.levels ? ` · ${h.levels[level - 1]}` : ''));
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(!!level));
+      if (h.levels) b.title = `Tap again for more: ${h.levels.join(' → ')}`;
+      b.addEventListener('click', () => setHabit(d, h.id, level >= max ? 0 : level + 1));
+      wrap.append(b);
+    }
+    container.append(el('p', 'group-label muted small', g.label), wrap);
+  }
+  const isNone = !!day && !Object.keys(day).length;
+  const none = el('button', null, '∅ None of these');
+  none.type = 'button';
+  none.setAttribute('aria-pressed', String(isNone));
+  none.addEventListener('click', () => setHabitDay(d, isNone ? null : {}));
+  const row = el('div', 'moods none-row');
+  row.append(none);
+  container.append(row);
+}
+
+function renderHabits(a) {
+  const today = todayIso();
+  habitButtons($('habit-today'), today);
+  renderHabitManage();
+
+  const box = $('habit-stats');
+  box.replaceChildren();
+  const f = habitInsights(a);
+  if (!f.ready) {
+    const bar = el('div', 'progress');
+    const fill = el('span');
+    fill.style.width = Math.min(100, Math.round(100 * f.span / HABIT_MIN_SPAN)) + '%';
+    bar.append(fill);
+    const needs = [];
+    if (f.span < HABIT_MIN_SPAN) needs.push(`${HABIT_MIN_SPAN - f.span} more days of tracking`);
+    if (!a.last) needs.push('at least one logged period');
+    box.append(el('h3', null, 'What affects your sleep and mood'),
+      el('p', 'muted small', 'After about 2 months of logging, this shows which habits go with bad nights or certain moods, and when in your cycle each habit tends to happen.'),
+      bar,
+      el('p', 'muted small', needs.length ? `Still needed: ${needs.join(', ')}.` : 'Almost there.'));
+    return;
+  }
+
+  const pct = x => `${Math.round(100 * x)}%`;
+  const more = r => (r.observed > r.expected ? 'more' : 'less');
+  const section = (title, items, line, empty) => {
+    box.append(el('h3', null, title));
+    if (!items.length) { box.append(el('p', 'muted small', empty)); return; }
+    const list = el('ul', 'findings');
+    for (const it of items.slice(0, HABIT_SHOW)) list.append(el('li', null, line(it)));
+    box.append(list);
+  };
+  section('Linked to your sleep', f.sleep,
+    r => `${r.f.label}: ${r.observed > r.expected ? 'more' : 'fewer'} bad nights after these days. ${pct(r.observed)} vs ${pct(r.expected)} expected for the same cycle phases (${plural(r.n, 'day')}).`,
+    'No habit stands out for your sleep yet.');
+  section('Linked to your mood', f.mood,
+    r => `${r.f.label}: ${r.mood.emoji} ${r.mood.label} ${more(r)} often on these days. ${pct(r.observed)} vs ${pct(r.expected)} expected for the same cycle phases (${plural(r.n, 'day')}).`,
+    'No habit stands out for your mood yet.');
+  section('Across your cycle', f.cycle,
+    r => `${r.f.label}: most common ${r.phase.when} (${pct(r.rate)} of those days vs ${pct(r.overall)} overall).`,
+    "Your habits don't seem tied to one part of your cycle.");
+  box.append(el('p', 'muted small', 'Each habit is compared with days without it in the same parts of your cycle, so PMS-time changes aren’t blamed on a habit. These are links in your own data, not proof of cause.'));
+}
+
+function renderHabitManage() {
+  const box = $('habit-manage');
+  box.replaceChildren();
+  for (const h of allHabits()) {
+    const row = el('div', 'habit-row');
+    const label = el('label');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = !state.hiddenHabits.includes(h.id);
+    cb.addEventListener('change', () => setHabitHidden(h.id, !cb.checked));
+    label.append(cb, el('span', null, ` ${h.emoji} ${h.label}`));
+    row.append(label);
+    if (h.group === 'custom') {
+      const rm = el('button', 'danger', 'Remove');
+      rm.type = 'button';
+      rm.addEventListener('click', () => removeCustomHabit(h));
+      row.append(rm);
+    }
+    box.append(row);
+  }
+}
+
 function renderCalendar(a) {
   const { predicted, fertile, ovulation } = predictions(a);
   const marked = new Set(state.days);
@@ -512,7 +787,7 @@ function renderCalendar(a) {
   $('mode-mood').setAttribute('aria-pressed', String(tapMode === 'mood'));
   $('cal-hint').textContent = tapMode === 'period'
     ? 'Tap a day to mark or unmark it as a period day.'
-    : 'Tap a day to log its moods and how you slept the night before.';
+    : 'Tap a day to log its moods, habits and how you slept the night before.';
 
   $('month-label').textContent = fmt(viewMonth, { month: 'long', year: 'numeric' });
 
@@ -604,14 +879,61 @@ async function setSleep(d, id) {
   if (moodDialogDay === d) refreshMoodDialog();
 }
 
+async function setHabitDay(d, day) {
+  if (day) state.habits[d] = day;
+  else delete state.habits[d];
+  await save();
+  render();
+  if (moodDialogDay === d) refreshMoodDialog();
+}
+
+// Untapping the last habit un-logs the day; "None of these" is an explicit tap.
+async function setHabit(d, id, level) {
+  const day = { ...(state.habits[d] || {}) };
+  if (level) day[id] = level;
+  else delete day[id];
+  await setHabitDay(d, Object.keys(day).length ? day : null);
+}
+
+async function setHabitHidden(id, hidden) {
+  state.hiddenHabits = state.hiddenHabits.filter(h => h !== id);
+  if (hidden) state.hiddenHabits.push(id);
+  await save();
+  render();
+}
+
+async function addCustomHabit(emoji, name) {
+  const label = name.trim().slice(0, 30);
+  if (!label) return false;
+  if (allHabits().some(h => h.label.toLowerCase() === label.toLowerCase())) {
+    alert('You already have a habit with that name.');
+    return false;
+  }
+  state.customHabits.push({ id: 'c' + Date.now().toString(36), emoji: firstGrapheme(emoji) || '⭐', label, since: todayIso() });
+  await save();
+  render();
+  return true;
+}
+
+async function removeCustomHabit(h) {
+  if (!confirm(`Remove “${h.label}” and everything logged for it?`)) return;
+  state.customHabits = state.customHabits.filter(c => c.id !== h.id);
+  state.hiddenHabits = state.hiddenHabits.filter(id => id !== h.id);
+  for (const day of Object.values(state.habits)) delete day[h.id];
+  await save();
+  render();
+}
+
 function refreshMoodDialog() {
-  moodButtons($('mood-dialog-options'), moodDialogDay);
-  sleepButtons($('sleep-dialog-options'), moodDialogDay);
-  $('mood-clear').hidden = !state.moods[moodDialogDay] && !state.sleep[moodDialogDay];
+  const d = moodDialogDay;
+  moodButtons($('mood-dialog-options'), d);
+  sleepButtons($('sleep-dialog-options'), d);
+  habitButtons($('habit-dialog-options'), d);
+  $('mood-clear').hidden = !state.moods[d] && !state.sleep[d] && !state.habits[d];
 }
 
 function openMoodDialog(d) {
-  if (d > todayIso()) { alert('You can only log moods and sleep for today or past days.'); return; }
+  if (d > todayIso()) { alert('You can only log moods, sleep and habits for today or past days.'); return; }
   moodDialogDay = d;
   $('mood-dialog-title').textContent = fmt(d, { weekday: 'long', day: 'numeric', month: 'long' });
   refreshMoodDialog();
@@ -621,7 +943,8 @@ function openMoodDialog(d) {
 
 async function exportBackup() {
   const blob = new Blob([JSON.stringify(
-    { app: 'follow-the-flow', version: 4, days: state.days, moods: state.moods, sleep: state.sleep }, null, 2)],
+    { app: 'follow-the-flow', version: 5, days: state.days, moods: state.moods, sleep: state.sleep,
+      habits: state.habits, customHabits: state.customHabits, hiddenHabits: state.hiddenHabits }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = el('a');
@@ -646,7 +969,8 @@ async function importBackup(file) {
     const incoming = sanitize(JSON.parse(await file.text()));
     const moodCount = Object.keys(incoming.moods).length;
     const sleepCount = Object.keys(incoming.sleep).length;
-    if (!confirm(`Import ${incoming.days.length} period days, moods for ${moodCount} days and ${sleepCount} bad nights? They will be merged with your current data.`)) return;
+    const habitCount = Object.keys(incoming.habits).length;
+    if (!confirm(`Import ${incoming.days.length} period days, moods for ${moodCount} days, ${sleepCount} bad nights and habits for ${habitCount} days? They will be merged with your current data.`)) return;
     state.days = [...new Set([...state.days, ...incoming.days])].sort();
     for (const [d, ids] of Object.entries(incoming.moods)) {
       const merged = new Set([...(state.moods[d] || []), ...ids]);
@@ -655,6 +979,15 @@ async function importBackup(file) {
     for (const [d, v] of Object.entries(incoming.sleep)) {
       // If both copies logged the night, keep the worse one.
       if (state.sleep[d] !== 'insomnia') state.sleep[d] = v;
+    }
+    for (const c of incoming.customHabits) {
+      if (!state.customHabits.some(x => x.id === c.id)) state.customHabits.push(c);
+    }
+    for (const [d, day] of Object.entries(incoming.habits)) {
+      // If both copies logged a habit, keep the higher level.
+      const merged = { ...(state.habits[d] || {}) };
+      for (const [id, lv] of Object.entries(day)) merged[id] = Math.max(merged[id] || 0, lv);
+      state.habits[d] = merged;
     }
     await save();
     render();
@@ -731,11 +1064,19 @@ function init() {
   $('reminder-snooze').addEventListener('click', snoozeReminder);
   $('mode-period').addEventListener('click', () => { tapMode = 'period'; render(); });
   $('mode-mood').addEventListener('click', () => { tapMode = 'mood'; render(); });
+  $('habit-add').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (await addCustomHabit($('habit-emoji').value, $('habit-name').value)) {
+      $('habit-emoji').value = '';
+      $('habit-name').value = '';
+    }
+  });
   $('mood-dialog').addEventListener('close', () => {
     const d = moodDialogDay;
     moodDialogDay = null;
     if ($('mood-dialog').returnValue === 'clear' && d) {
       delete state.sleep[d];
+      delete state.habits[d];
       setMoods(d, []);
     }
   });
