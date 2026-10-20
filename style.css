@@ -11,6 +11,9 @@
   --ovulation: #7fbfe0;
   --sleep: #6f4fc2;
   --chart: #b23a5b;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +29,9 @@
     --ovulation: #3f86ad;
     --sleep: #9278d4;
     --chart: #dc6a8f;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
   }
 }
 * { box-sizing: border-box; }
@@ -181,15 +187,34 @@ dialog h3 { margin: 12px 0 6px; }
 .chart { position: relative; }
 .chart svg { display: block; touch-action: pan-y; }
 .chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.chart-line { fill: none; stroke: var(--chart); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart-area { fill: var(--chart); opacity: .1; }
-.chart-dot { fill: var(--chart); stroke: var(--card); stroke-width: 2; }
+.chart-line { fill: none; stroke: var(--line); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-area { fill: var(--line); opacity: .1; }
+.chart-dot { fill: var(--line); stroke: var(--card); stroke-width: 2; }
+/* Line colours by slot (validated as a set for colour-blind separation in both themes). */
+.s1 { --line: var(--series-1); }
+.s2 { --line: var(--series-2); }
+.s3 { --line: var(--series-3); }
+.chart-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin: 4px 0 10px; }
+.chip-pick {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: center;
+  font-size: .85rem; padding: 4px 10px; border-radius: 10px; text-align: left; min-width: 0; align-content: start;
+}
+.chip-pick .pick-total { grid-column: 2; }
+.chip-pick .pick-key { width: 14px; height: 0; border-top: 2px dashed var(--muted); }
+.chip-pick[aria-pressed="true"] { border-color: var(--line); }
+.chip-pick[aria-pressed="true"] .pick-key { border-top: 3px solid var(--line); border-radius: 2px; }
+.chip-pick .pick-total { color: var(--muted); font-size: .78rem; }
+.picker-note { margin: -4px 0 8px; }
+.tip-head { font-weight: 600; margin-bottom: 2px; }
+.tip-row { display: flex; align-items: center; gap: 6px; }
+.tip-key { width: 12px; border-top: 2px solid var(--line); }
+.tip-name { opacity: .75; }
 .chart-cross { stroke: var(--muted); stroke-width: 1; }
 .chart-grid, .chart-axis { stroke: var(--border); stroke-width: 1; }
 .chart-label { fill: var(--muted); font-size: 10px; }
 .chart-label.tick { text-anchor: middle; font-variant-numeric: tabular-nums; }
 .chart-tip {
-  position: absolute; top: -2px; z-index: 1; pointer-events: none; white-space: nowrap;
+  position: absolute; top: calc(100% + 2px); z-index: 1; pointer-events: none; white-space: nowrap;
   background: var(--text); color: var(--bg); font-size: .78rem; padding: 3px 8px; border-radius: 6px;
 }
 .chart-table summary { cursor: pointer; color: var(--accent); margin: 8px 0; }

@@ -91,10 +91,11 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 //   Only days present here count in the analysis, so forgotten days don't skew it.
 // customHabits: [{ id, emoji, label, since }] habits added by the user
 // hiddenHabits: [habitId] habits the user doesn't track
+// chartPicks: [key | null] x3 lines shown on the recap chart, by colour slot (null = default)
 // createdAt / lastExport / snoozeUntil: ISO dates driving the backup reminder
 function emptyState() {
   return {
-    days: [], moods: {}, sleep: {}, habits: {}, customHabits: [], hiddenHabits: [],
+    days: [], moods: {}, sleep: {}, habits: {}, customHabits: [], hiddenHabits: [], chartPicks: null,
     createdAt: null, lastExport: null, snoozeUntil: null,
   };
 }
@@ -723,8 +724,12 @@ function sanitize(data) {
     }
   }
   const hiddenHabits = Array.isArray(data.hiddenHabits) ? [...new Set(data.hiddenHabits.filter(id => maxLevel.has(id)))] : [];
+  const chartKeys = new Set(RECAP_CHARTS.map(c => c.habit || 'sleep'));
+  const chartPicks = Array.isArray(data.chartPicks) && data.chartPicks.length === 3
+    ? data.chartPicks.map(k => (chartKeys.has(k) ? k : null)).map((k, i, all) => (all.indexOf(k) === i ? k : null))
+    : null;
   return {
-    days: [...new Set(days)].sort(), moods, sleep, habits, customHabits, hiddenHabits,
+    days: [...new Set(days)].sort(), moods, sleep, habits, customHabits, hiddenHabits, chartPicks,
     createdAt: date(data.createdAt), lastExport: date(data.lastExport), snoozeUntil: date(data.snoozeUntil),
   };
 }
@@ -1200,11 +1205,13 @@ function niceMax(v) {
   return [1, 2, 5, 10].map(k => k * p).find(n => n >= v);
 }
 
-// A line chart of one series. points: [{ label, value (null = nothing logged), tip }].
-// Days with nothing logged break the line instead of dropping it to zero.
-// Hover, tap or arrow keys show each point's value; the table below has them all too.
-function lineChart(points, max, topLabel, ticks, width, title) {
-  const H = 64, TOP = 16, BOTTOM = 18, n = points.length;
+// A line chart of up to three series on one shared scale.
+// series: [{ slot (1-3, picks the colour), values: [number | null] }], where null
+// (nothing logged) breaks the line instead of dropping it to zero.
+// readout(i) gives the tooltip for position i: { head, rows: [{ slot, value, name }] }.
+// Hover, tap or arrow keys show the readout; the table below has every value too.
+function lineChart({ series, n, max, topLabel, ticks, width, title, readout }) {
+  const H = 110, TOP = 16, BOTTOM = 18;
   const slot = width / n;
   const base = TOP + H;
   const px = i => (i + 0.5) * slot;
@@ -1217,27 +1224,35 @@ function lineChart(points, max, topLabel, ticks, width, title) {
   const top = svg('text', { x: 0, y: TOP - 5, class: 'chart-label' });
   top.textContent = topLabel;
   chart.append(top);
-  // Unbroken runs of logged values, each drawn as a line over a light wash.
-  const runs = [];
-  points.forEach((p, i) => {
-    if (p.value == null) return;
-    const last = runs[runs.length - 1];
-    if (last && last[last.length - 1] === i - 1) last.push(i);
-    else runs.push([i]);
-  });
-  for (const run of runs) {
-    const line = run.map((i, k) => `${k ? 'L' : 'M'}${px(i)},${py(points[i].value)}`).join('');
-    if (run.length > 1) {
-      chart.append(svg('path', { class: 'chart-area', d: `${line}L${px(run[run.length - 1])},${base}L${px(run[0])},${base}Z` }),
-        svg('path', { class: 'chart-line', d: line }));
-    } else {
-      // A lone logged day has no neighbours to join, so it shows as a dot.
-      chart.append(svg('circle', { class: 'chart-dot', cx: px(run[0]), cy: py(points[run[0]].value), r: 4 }));
+  for (const s of series) {
+    // Unbroken runs of logged values. A lone one has no neighbours to join, so it shows as a dot.
+    const runs = [];
+    s.values.forEach((v, i) => {
+      if (v == null) return;
+      const last = runs[runs.length - 1];
+      if (last && last[last.length - 1] === i - 1) last.push(i);
+      else runs.push([i]);
+    });
+    for (const run of runs) {
+      const line = run.map((i, k) => `${k ? 'L' : 'M'}${px(i)},${py(s.values[i])}`).join('');
+      if (run.length > 1) {
+        // A light wash under a single line; with several it would only muddy them.
+        if (series.length === 1) {
+          chart.append(svg('path', { class: `chart-area s${s.slot}`, d: `${line}L${px(run[run.length - 1])},${base}L${px(run[0])},${base}Z` }));
+        }
+        chart.append(svg('path', { class: `chart-line s${s.slot}`, d: line }));
+      } else {
+        chart.append(svg('circle', { class: `chart-dot s${s.slot}`, cx: px(run[0]), cy: py(s.values[run[0]]), r: 4 }));
+      }
     }
   }
   const cross = svg('line', { y1: TOP, y2: base, class: 'chart-cross', visibility: 'hidden' });
-  const focus = svg('circle', { r: 4, class: 'chart-dot focus', visibility: 'hidden' });
-  chart.append(cross, focus);
+  chart.append(cross);
+  const focus = series.map(s => {
+    const dot = svg('circle', { r: 4, class: `chart-dot s${s.slot}`, visibility: 'hidden' });
+    chart.append(dot);
+    return dot;
+  });
   for (const [i, label] of ticks) {
     const t = svg('text', { x: Math.min(width - 2, Math.max(2, (i + 0.5) * slot)), y: base + 13, class: 'chart-label tick' });
     t.textContent = label;
@@ -1248,19 +1263,29 @@ function lineChart(points, max, topLabel, ticks, width, title) {
   let current = -1;
   const show = i => {
     current = Math.max(0, Math.min(n - 1, i));
-    const x = px(current), v = points[current].value;
+    const x = px(current);
     cross.setAttribute('x1', x);
     cross.setAttribute('x2', x);
     cross.setAttribute('visibility', 'visible');
-    if (v != null) { focus.setAttribute('cx', x); focus.setAttribute('cy', py(v)); }
-    focus.setAttribute('visibility', v != null ? 'visible' : 'hidden');
-    tip.textContent = points[current].tip;
+    series.forEach((s, k) => {
+      const v = s.values[current];
+      if (v != null) { focus[k].setAttribute('cx', x); focus[k].setAttribute('cy', py(v)); }
+      focus[k].setAttribute('visibility', v != null ? 'visible' : 'hidden');
+    });
+    // Values lead, names follow; a short line in the series colour keys each row.
+    const r = readout(current);
+    tip.replaceChildren(el('div', 'tip-head', r.head));
+    for (const row of r.rows) {
+      const line = el('div', 'tip-row');
+      line.append(el('span', `tip-key s${row.slot}`), el('strong', null, row.value), el('span', 'tip-name', row.name));
+      tip.append(line);
+    }
     tip.hidden = false;
     tip.style.left = Math.min(width - tip.offsetWidth, Math.max(0, x - tip.offsetWidth / 2)) + 'px';
   };
   const hide = () => {
     cross.setAttribute('visibility', 'hidden');
-    focus.setAttribute('visibility', 'hidden');
+    for (const f of focus) f.setAttribute('visibility', 'hidden');
     current = -1;
     tip.hidden = true;
   };
@@ -1276,6 +1301,27 @@ function lineChart(points, max, topLabel, ticks, width, title) {
   });
   wrap.append(tip, chart);
   return wrap;
+}
+
+// Turn a line on or off. A new line takes the first free colour, and lines already
+// shown keep theirs, so a colour always means the same thing while it's on screen.
+async function toggleChartPick(key) {
+  const picks = chartPicks();
+  const at = picks.indexOf(key);
+  if (at >= 0) picks[at] = null;
+  else {
+    const free = picks.indexOf(null);
+    if (free < 0) return false;
+    picks[free] = key;
+  }
+  state.chartPicks = picks;
+  await save();
+  renderMonthRecap(analyse());
+  return true;
+}
+
+function chartPicks() {
+  return state.chartPicks ? [...state.chartPicks] : ['alcohol', 'meetings', null];
 }
 
 function renderRecapCharts(box, a) {
@@ -1298,57 +1344,83 @@ function renderRecapCharts(box, a) {
   const days = rangeDays(recapRange);
   const months = recapRange === 'year' ? Array.from({ length: 12 }, (_, i) => addMonths(days[0], i)) : null;
   const columns = months || days;
-  const table = [];
-  let shown = 0;
+  const picks = chartPicks();
+
+  // Everything with data in this period, with its values per day or per month.
+  const avail = [];
   for (const def of RECAP_CHARTS) {
     const c = chartSeries(def);
     if (!c) continue;
     const t = chartTotals(c, days);
     if (!t.hit) continue;
-    shown++;
-    let points, max, topLabel, cells;
+    const summary = c.key === 'sleep' ? c.total(t.hit) : c.total(t.sum) + (c.amount ? ` · ${plural(t.hit, 'day')}` : '');
+    let values, texts, cells;
     if (months) {
-      // One point per month: the total for that month.
-      points = months.map(m => {
-        const mt = chartTotals(c, daysBetween(m, 1));
-        const name = fmt(m, { month: 'long' });
-        const tip = m > today ? `${name}: not yet` : !mt.logged ? `${name}: nothing logged`
-          : `${name}: ${c.total(mt.sum)}` + (c.amount ? ` over ${plural(mt.hit, 'day')}` : '') + ` · ${plural(mt.logged, 'day')} logged`;
-        return { label: name, value: mt.logged ? mt.sum : null, tip, cell: mt.logged ? c.total(mt.sum) : '–' };
-      });
-      max = niceMax(Math.max(...points.map(p => p.value || 0)));
-      topLabel = c.total(max);
+      // Per month: the share of logged days with the habit, so different habits share one scale.
+      const totals = months.map(m => (m > today ? null : chartTotals(c, daysBetween(m, 1))));
+      values = totals.map(mt => (mt && mt.logged ? mt.hit / mt.logged : null));
+      texts = totals.map(mt => (!mt ? 'not yet' : !mt.logged ? 'not logged'
+        : `${c.key === 'sleep' ? c.total(mt.hit) : c.total(mt.sum)}${c.amount ? ` over ${plural(mt.hit, 'day')}` : ''} (${Math.round(100 * mt.hit / mt.logged)}%)`));
+      cells = totals.map(mt => (!mt ? '' : !mt.logged ? '–' : c.key === 'sleep' ? c.total(mt.hit) : c.total(mt.sum)));
     } else {
-      // One point per day: the level logged that day.
-      points = days.map(d => {
-        const v = d > today ? null : c.value(d);
-        const name = fmt(d, { weekday: 'short', day: 'numeric', month: 'short' });
-        return { label: name, value: v, tip: d > today ? `${name}: not yet` : `${name}: ${levelText(c, v)}`,
-          cell: d > today ? '' : v == null ? '–' : levelText(c, v) };
-      });
-      max = c.levels.length;
-      topLabel = c.key === 'sick' ? '' : c.levels[max - 1];
+      // Per day: how high that day's level is, from none (0) to the habit's top level (1).
+      const raw = days.map(d => (d > today ? null : c.value(d)));
+      values = raw.map(v => (v == null ? null : v / c.levels.length));
+      texts = raw.map((v, i) => (days[i] > today ? 'not yet' : levelText(c, v)));
+      cells = raw.map((v, i) => (days[i] > today ? '' : v == null ? '–' : levelText(c, v)));
     }
-    cells = points.map(p => p.cell);
-    table.push({ title: `${c.emoji} ${c.title}`, cells });
-
-    const head = el('div', 'chart-head');
-    let summary = c.total(t.sum) + (c.amount ? ` over ${plural(t.hit, 'day')}` : '');
-    if (c.key === 'sleep') summary = c.total(t.hit);
-    head.append(el('span', 'chart-title', `${c.emoji} ${c.title}`), el('span', 'chart-total', summary));
-    const ticks = months
-      ? months.map((m, i) => [i, fmt(m, { month: 'narrow' })])
-      : [0, 7, 14, 21, 28].filter(i => i < days.length).map(i => [i, String(i + 1)]);
-    const title = `${c.title}, ${months ? `per month in ${year}` : `per day in ${fmt(viewMonth, { month: 'long', year: 'numeric' })}`}: ${summary}`;
-    box.append(head, lineChart(points, max, topLabel, ticks, width, title));
+    avail.push({ c, summary, values, texts, cells, slot: picks.indexOf(c.key) + 1 });
   }
-  if (!shown) {
+  if (!avail.length) {
     box.append(el('p', 'muted small', `Nothing to chart for ${recapRange === 'year' ? year : 'this month'} yet. Log alcohol, meetings, caffeine, sleep and more from the Habits and Sleep cards.`));
     return;
   }
+
+  // The legend doubles as the picker: tap to show or hide a line, up to three at once.
+  const legend = el('div', 'chart-picker');
+  legend.setAttribute('role', 'group');
+  legend.setAttribute('aria-label', 'Lines to show');
+  const full = picks.every(Boolean);
+  const note = el('p', 'muted small picker-note', 'Up to 3 lines at a time. Turn one off to add another.');
+  note.hidden = true;
+  for (const s of avail) {
+    const b = el('button', s.slot ? `chip-pick s${s.slot}` : 'chip-pick');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(!!s.slot));
+    b.append(el('span', 'pick-key'), el('span', null, `${s.c.emoji} ${s.c.title}`), el('span', 'pick-total', s.summary));
+    b.addEventListener('click', async () => {
+      if (!(await toggleChartPick(s.c.key))) note.hidden = false;
+    });
+    if (!s.slot && full) b.title = 'Up to 3 lines at a time';
+    legend.append(b);
+  }
+  box.append(legend, note);
+
+  const shown = avail.filter(s => s.slot).sort((x, y) => x.slot - y.slot);
+  if (!shown.length) {
+    box.append(el('p', 'muted small', 'Pick up to 3 to draw them on the chart.'));
+  } else {
+    const n = columns.length;
+    const max = months ? Math.min(1, niceMax(100 * Math.max(...shown.flatMap(s => s.values.map(v => v || 0)))) / 100) : 1;
+    const ticks = months
+      ? months.map((m, i) => [i, fmt(m, { month: 'narrow' })])
+      : [0, 7, 14, 21, 28].filter(i => i < days.length).map(i => [i, String(i + 1)]);
+    const names = shown.map(s => s.c.title).join(', ');
+    box.append(lineChart({
+      series: shown.map(s => ({ slot: s.slot, values: s.values })),
+      n, max, ticks, width,
+      topLabel: months ? `${Math.round(100 * max)}% of days` : 'most',
+      title: `${names}, ${months ? `share of logged days per month in ${year}` : `per day in ${fmt(viewMonth, { month: 'long', year: 'numeric' })}`}`,
+      readout: i => ({
+        head: months ? fmt(columns[i], { month: 'long' }) : fmt(columns[i], { weekday: 'short', day: 'numeric', month: 'short' }),
+        rows: shown.map(s => ({ slot: s.slot, value: s.texts[i], name: s.c.title })),
+      }),
+    }));
+  }
   box.append(el('p', 'muted small', recapRange === 'year'
-    ? 'Totals per month. Drinks and cups add up (5+ counts as 5); other habits count days. Months with nothing logged leave a gap. Tap a chart for details.'
-    : 'One point per day: higher means more. Days with nothing logged leave a gap in the line. Tap a chart for details.'));
+    ? 'Each point is the share of logged days with that habit in the month (for sleep, the share of bad nights). Months with nothing logged leave a gap. Tap the chart for totals.'
+    : 'Each line goes from none at the bottom to its highest level at the top (5+ drinks, meetings all day, insomnia…). Days with nothing logged leave a gap. Tap the chart for details.'));
+  const table = avail.map(s => ({ title: `${s.c.emoji} ${s.c.title}`, cells: s.cells }));
 
   // Every charted value, for reading without the charts.
   const details = el('details', 'chart-table');
