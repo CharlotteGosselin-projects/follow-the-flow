@@ -1200,12 +1200,15 @@ function niceMax(v) {
   return [1, 2, 5, 10].map(k => k * p).find(n => n >= v);
 }
 
-// A column chart of one series. points: [{ label, value (null = nothing logged), tip }].
-// Hover, tap or arrow keys show each column's value; the table below has them all too.
-function barChart(points, max, topLabel, ticks, width, title) {
+// A line chart of one series. points: [{ label, value (null = nothing logged), tip }].
+// Days with nothing logged break the line instead of dropping it to zero.
+// Hover, tap or arrow keys show each point's value; the table below has them all too.
+function lineChart(points, max, topLabel, ticks, width, title) {
   const H = 64, TOP = 16, BOTTOM = 18, n = points.length;
-  const slot = width / n, bw = Math.min(24, Math.max(2, slot - 2)), r = Math.min(4, bw / 2);
+  const slot = width / n;
   const base = TOP + H;
+  const px = i => (i + 0.5) * slot;
+  const py = v => base - H * Math.min(v, max) / max;
   const wrap = el('div', 'chart');
   const chart = svg('svg', { width, height: TOP + H + BOTTOM, viewBox: `0 0 ${width} ${TOP + H + BOTTOM}`,
     role: 'img', tabindex: '0', 'aria-label': `${title}. Use the left and right arrow keys to read each value.` });
@@ -1214,16 +1217,27 @@ function barChart(points, max, topLabel, ticks, width, title) {
   const top = svg('text', { x: 0, y: TOP - 5, class: 'chart-label' });
   top.textContent = topLabel;
   chart.append(top);
-  const bars = points.map((p, i) => {
-    if (!(p.value > 0)) return null;
-    const x = i * slot + (slot - bw) / 2;
-    const y = base - Math.max(3, H * Math.min(p.value, max) / max);
-    // Rounded at the data end, square on the baseline.
-    const bar = svg('path', { class: 'chart-bar',
-      d: `M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${base}Z` });
-    chart.append(bar);
-    return bar;
+  // Unbroken runs of logged values, each drawn as a line over a light wash.
+  const runs = [];
+  points.forEach((p, i) => {
+    if (p.value == null) return;
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === i - 1) last.push(i);
+    else runs.push([i]);
   });
+  for (const run of runs) {
+    const line = run.map((i, k) => `${k ? 'L' : 'M'}${px(i)},${py(points[i].value)}`).join('');
+    if (run.length > 1) {
+      chart.append(svg('path', { class: 'chart-area', d: `${line}L${px(run[run.length - 1])},${base}L${px(run[0])},${base}Z` }),
+        svg('path', { class: 'chart-line', d: line }));
+    } else {
+      // A lone logged day has no neighbours to join, so it shows as a dot.
+      chart.append(svg('circle', { class: 'chart-dot', cx: px(run[0]), cy: py(points[run[0]].value), r: 4 }));
+    }
+  }
+  const cross = svg('line', { y1: TOP, y2: base, class: 'chart-cross', visibility: 'hidden' });
+  const focus = svg('circle', { r: 4, class: 'chart-dot focus', visibility: 'hidden' });
+  chart.append(cross, focus);
   for (const [i, label] of ticks) {
     const t = svg('text', { x: Math.min(width - 2, Math.max(2, (i + 0.5) * slot)), y: base + 13, class: 'chart-label tick' });
     t.textContent = label;
@@ -1233,16 +1247,20 @@ function barChart(points, max, topLabel, ticks, width, title) {
   tip.hidden = true;
   let current = -1;
   const show = i => {
-    if (current >= 0 && bars[current]) bars[current].classList.remove('active');
     current = Math.max(0, Math.min(n - 1, i));
-    if (bars[current]) bars[current].classList.add('active');
+    const x = px(current), v = points[current].value;
+    cross.setAttribute('x1', x);
+    cross.setAttribute('x2', x);
+    cross.setAttribute('visibility', 'visible');
+    if (v != null) { focus.setAttribute('cx', x); focus.setAttribute('cy', py(v)); }
+    focus.setAttribute('visibility', v != null ? 'visible' : 'hidden');
     tip.textContent = points[current].tip;
     tip.hidden = false;
-    const x = (current + 0.5) * slot;
     tip.style.left = Math.min(width - tip.offsetWidth, Math.max(0, x - tip.offsetWidth / 2)) + 'px';
   };
   const hide = () => {
-    if (current >= 0 && bars[current]) bars[current].classList.remove('active');
+    cross.setAttribute('visibility', 'hidden');
+    focus.setAttribute('visibility', 'hidden');
     current = -1;
     tip.hidden = true;
   };
@@ -1290,7 +1308,7 @@ function renderRecapCharts(box, a) {
     shown++;
     let points, max, topLabel, cells;
     if (months) {
-      // One column per month: the total for that month.
+      // One point per month: the total for that month.
       points = months.map(m => {
         const mt = chartTotals(c, daysBetween(m, 1));
         const name = fmt(m, { month: 'long' });
@@ -1301,7 +1319,7 @@ function renderRecapCharts(box, a) {
       max = niceMax(Math.max(...points.map(p => p.value || 0)));
       topLabel = c.total(max);
     } else {
-      // One column per day: the level logged that day.
+      // One point per day: the level logged that day.
       points = days.map(d => {
         const v = d > today ? null : c.value(d);
         const name = fmt(d, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -1322,15 +1340,15 @@ function renderRecapCharts(box, a) {
       ? months.map((m, i) => [i, fmt(m, { month: 'narrow' })])
       : [0, 7, 14, 21, 28].filter(i => i < days.length).map(i => [i, String(i + 1)]);
     const title = `${c.title}, ${months ? `per month in ${year}` : `per day in ${fmt(viewMonth, { month: 'long', year: 'numeric' })}`}: ${summary}`;
-    box.append(head, barChart(points, max, topLabel, ticks, width, title));
+    box.append(head, lineChart(points, max, topLabel, ticks, width, title));
   }
   if (!shown) {
     box.append(el('p', 'muted small', `Nothing to chart for ${recapRange === 'year' ? year : 'this month'} yet. Log alcohol, meetings, caffeine, sleep and more from the Habits and Sleep cards.`));
     return;
   }
   box.append(el('p', 'muted small', recapRange === 'year'
-    ? 'Totals per month. Drinks and cups add up (5+ counts as 5); other habits count days. Tap a column for details.'
-    : 'Each column is a day: taller means more. Days with nothing logged are left empty. Tap a column for details.'));
+    ? 'Totals per month. Drinks and cups add up (5+ counts as 5); other habits count days. Months with nothing logged leave a gap. Tap a chart for details.'
+    : 'One point per day: higher means more. Days with nothing logged leave a gap in the line. Tap a chart for details.'));
 
   // Every charted value, for reading without the charts.
   const details = el('details', 'chart-table');
