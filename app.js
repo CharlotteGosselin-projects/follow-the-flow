@@ -69,6 +69,20 @@ const GOOD_MOODS = ['happy', 'calm'];
 const TOUGH_MOODS = ['sad', 'irritable', 'anxious'];
 const RECAP_MIN_MOOD_DAYS = 3;  // mood days needed to describe a month
 const RECAP_COMPARE_DAYS = 5;   // mood days needed in both months to compare them
+// Charted in the recap, in this order, when there's something to show. `amount`:
+// the levels are counts (drinks, cups), so totals add them up; otherwise totals count days.
+const RECAP_CHARTS = [
+  { habit: 'alcohol', amount: 'drink' },
+  { habit: 'meetings' },
+  { habit: 'caffeine', amount: 'cup' },
+  { sleep: true },
+  { habit: 'stress' },
+  { habit: 'exercise' },
+  { habit: 'sick' },
+];
+const RECAP_INSIGHTS = ['alcohol', 'meetings', 'caffeine', 'stress'];
+const INSIGHT_MIN_DAYS = 4;     // days on each side before comparing moods or sleep
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
 // moods: { 'YYYY-MM-DD': [moodId, ...] } (several moods per day allowed)
@@ -91,6 +105,7 @@ let salt = null;
 let viewMonth = startOfMonth(todayIso());
 let tapMode = 'period';    // what tapping a calendar day does: 'period' | 'mood'
 let moodDialogDay = null;
+let recapRange = 'month';  // what the recap charts cover: 'month' | 'year'
 
 // ---------- dates (UTC math on ISO strings avoids DST/timezone drift) ----------
 
@@ -493,6 +508,139 @@ function compareMonths(s, prev) {
     }
   }
   return lines;
+}
+
+// ---------- recap charts & insights ----------
+
+// The days a recap chart covers: the shown month day by day, or its year month by month.
+function rangeDays(range) {
+  return range === 'year' ? daysBetween(viewMonth.slice(0, 5) + '01-01', 12) : daysBetween(viewMonth, 1);
+}
+
+// Every date in the `months` calendar months starting at `from` (a 1st of the month).
+function daysBetween(from, months) {
+  const out = [];
+  for (let d = from, to = addMonths(from, months); d < to; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+// One chart's daily values: a number for a logged day (0 = logged, not this habit),
+// null for a day with nothing logged.
+function chartSeries(c) {
+  const today = todayIso();
+  if (c.sleep) {
+    const first = Object.keys(state.sleep).sort()[0];
+    return {
+      key: 'sleep', emoji: '🌙', title: 'Bad nights', levels: ['poor sleep', 'insomnia'], amount: null,
+      value: d => (first && d >= first && d <= today ? (state.sleep[d] === 'insomnia' ? 2 : state.sleep[d] ? 1 : 0) : null),
+      total: n => plural(n, 'bad night'),
+    };
+  }
+  const h = allHabits().find(x => x.id === c.habit);
+  if (!h || state.hiddenHabits.includes(h.id)) return null;
+  return {
+    key: h.id, emoji: h.emoji, title: h.label, levels: h.levels || ['yes'], amount: c.amount || null, heavy: h.heavy,
+    value: d => (state.habits[d] && d <= today ? state.habits[d][h.id] || 0 : null),
+    total: n => plural(n, c.amount || 'day'),
+  };
+}
+
+// Text for one day's value, e.g. '2 drinks', 'a lot', 'none', 'not logged'.
+function levelText(c, v) {
+  if (v == null) return 'not logged';
+  if (!v) return 'none';
+  return c.key === 'sick' ? 'sick' : c.levels[v - 1];
+}
+
+// Days and totals for a set of dates. Amount habits add up their counts (5+ counts as 5).
+function chartTotals(c, days) {
+  let logged = 0, hit = 0, sum = 0, heavy = 0;
+  for (const d of days) {
+    const v = c.value(d);
+    if (v == null) continue;
+    logged++;
+    if (v) { hit++; sum += v; if (c.heavy && v >= c.heavy.level) heavy++; }
+  }
+  return { logged, hit, sum: c.amount ? sum : hit, heavy };
+}
+
+function shortList(items) {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+// Plain-language findings for the charted range. Simple counts over this range, so they
+// describe what happened rather than prove a cause.
+function recapInsights(range, a) {
+  const today = todayIso();
+  const days = rangeDays(range).filter(d => d <= today);
+  const out = [];
+  for (const id of RECAP_INSIGHTS) {
+    const c = chartSeries({ habit: id, amount: RECAP_CHARTS.find(x => x.habit === id).amount });
+    if (!c) continue;
+    const logged = days.filter(d => c.value(d) != null);
+    const hitDays = logged.filter(d => c.value(d) > 0);
+    if (!hitDays.length) continue;
+    const name = c.title.toLowerCase();
+
+    // Compared with the months before (month view only).
+    if (range === 'month' && logged.length >= 7) {
+      const past = [];
+      for (let k = 1; k <= 6; k++) {
+        const t = chartTotals(c, daysBetween(addMonths(viewMonth, -k), 1));
+        if (t.logged >= 10) past.push(t.hit / t.logged);
+      }
+      if (past.length >= 2) {
+        const usual = past.reduce((x, y) => x + y, 0) / past.length;
+        const now = hitDays.length / logged.length;
+        if (Math.abs(now - usual) >= 0.1 && (now >= 1.5 * usual || now <= usual / 1.5)) {
+          out.push(`${c.emoji} ${now > usual ? 'More' : 'Less'} ${name} than usual: ${Math.round(100 * now)}% of logged days vs ${Math.round(100 * usual)}% in your previous months.`);
+        }
+      }
+    }
+    // Heavy days (3+ drinks, 3+ cups, a lot of meetings).
+    if (c.heavy) {
+      const heavy = hitDays.filter(d => c.value(d) >= c.heavy.level).length;
+      if (heavy) out.push(`${c.emoji} ${plural(heavy, 'day')} with ${c.amount ? c.heavy.label : `${name} ${c.heavy.label}`}.`);
+    }
+    // Days of the week.
+    if (hitDays.length >= 5) {
+      const byDay = Array(7).fill(0);
+      for (const d of hitDays) byDay[(new Date(toMs(d)).getUTCDay() + 6) % 7]++;
+      const top = byDay.map((n, i) => ({ n, i })).sort((x, y) => y.n - x.n);
+      const share = (top[0].n + top[1].n) / hitDays.length;
+      if (share >= 0.6) {
+        const names = top.slice(0, 2).sort((x, y) => x.i - y.i).map(t => fmt(addDays('2024-01-01', t.i), { weekday: 'long' }) + 's');
+        out.push(`${c.emoji} ${c.title} mostly on ${shortList(names)} (${Math.round(100 * share)}% of ${plural(hitDays.length, 'day')}).`);
+      }
+    }
+    // Part of the cycle.
+    const ph = hitDays.length >= INSIGHT_MIN_DAYS && mainPhase(hitDays, a);
+    if (ph && hitDays.length >= 6) out.push(`${c.emoji} ${c.title} days were mostly ${ph.when}.`);
+
+    // Mood the same day and sleep the night after, with vs without (or heavy vs not).
+    const isHit = c.heavy ? d => c.value(d) >= c.heavy.level : d => c.value(d) > 0;
+    const what = c.heavy ? `days with ${c.amount ? c.heavy.label : `${name} ${c.heavy.label}`}` : `${name} days`;
+    const moodDays = logged.filter(d => state.moods[d]);
+    const tough = d => state.moods[d].some(m => TOUGH_MOODS.includes(m));
+    const mw = moodDays.filter(isHit), mo = moodDays.filter(d => !isHit(d));
+    if (mw.length >= INSIGHT_MIN_DAYS && mo.length >= INSIGHT_MIN_DAYS) {
+      const x = mw.filter(tough).length / mw.length, y = mo.filter(tough).length / mo.length;
+      if (Math.abs(x - y) >= 0.25) {
+        out.push(`${c.emoji} Tough moods on ${Math.round(100 * x)}% of ${what} vs ${Math.round(100 * y)}% of other days.`);
+      }
+    }
+    const firstSleep = Object.keys(state.sleep).sort()[0];
+    const nights = firstSleep ? logged.filter(d => addDays(d, 1) >= firstSleep && addDays(d, 1) <= today) : [];
+    const sw = nights.filter(isHit), so = nights.filter(d => !isHit(d));
+    if (sw.length >= INSIGHT_MIN_DAYS && so.length >= INSIGHT_MIN_DAYS) {
+      const bad = d => !!state.sleep[addDays(d, 1)];
+      const x = sw.filter(bad).length / sw.length, y = so.filter(bad).length / so.length;
+      if (Math.abs(x - y) >= 0.2) {
+        out.push(`${c.emoji} A bad night after ${Math.round(100 * x)}% of ${what} vs ${Math.round(100 * y)}% of other days.`);
+      }
+    }
+  }
+  return out;
 }
 
 // ---------- persistence ----------
@@ -1035,6 +1183,182 @@ function renderMonthRecap(a) {
     for (const l of lines) list.append(el('li', null, l));
     box.append(list);
   }
+
+  renderRecapCharts(box, a);
+}
+
+function svg(tag, attrs) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+// Round a chart's top value up to 5, 10, 20, 50, 100...
+function niceMax(v) {
+  if (v <= 5) return 5;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 5, 10].map(k => k * p).find(n => n >= v);
+}
+
+// A column chart of one series. points: [{ label, value (null = nothing logged), tip }].
+// Hover, tap or arrow keys show each column's value; the table below has them all too.
+function barChart(points, max, topLabel, ticks, width, title) {
+  const H = 64, TOP = 16, BOTTOM = 18, n = points.length;
+  const slot = width / n, bw = Math.min(24, Math.max(2, slot - 2)), r = Math.min(4, bw / 2);
+  const base = TOP + H;
+  const wrap = el('div', 'chart');
+  const chart = svg('svg', { width, height: TOP + H + BOTTOM, viewBox: `0 0 ${width} ${TOP + H + BOTTOM}`,
+    role: 'img', tabindex: '0', 'aria-label': `${title}. Use the left and right arrow keys to read each value.` });
+  chart.append(svg('line', { x1: 0, x2: width, y1: TOP, y2: TOP, class: 'chart-grid' }),
+    svg('line', { x1: 0, x2: width, y1: base, y2: base, class: 'chart-axis' }));
+  const top = svg('text', { x: 0, y: TOP - 5, class: 'chart-label' });
+  top.textContent = topLabel;
+  chart.append(top);
+  const bars = points.map((p, i) => {
+    if (!(p.value > 0)) return null;
+    const x = i * slot + (slot - bw) / 2;
+    const y = base - Math.max(3, H * Math.min(p.value, max) / max);
+    // Rounded at the data end, square on the baseline.
+    const bar = svg('path', { class: 'chart-bar',
+      d: `M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${base}Z` });
+    chart.append(bar);
+    return bar;
+  });
+  for (const [i, label] of ticks) {
+    const t = svg('text', { x: Math.min(width - 2, Math.max(2, (i + 0.5) * slot)), y: base + 13, class: 'chart-label tick' });
+    t.textContent = label;
+    chart.append(t);
+  }
+  const tip = el('div', 'chart-tip');
+  tip.hidden = true;
+  let current = -1;
+  const show = i => {
+    if (current >= 0 && bars[current]) bars[current].classList.remove('active');
+    current = Math.max(0, Math.min(n - 1, i));
+    if (bars[current]) bars[current].classList.add('active');
+    tip.textContent = points[current].tip;
+    tip.hidden = false;
+    const x = (current + 0.5) * slot;
+    tip.style.left = Math.min(width - tip.offsetWidth, Math.max(0, x - tip.offsetWidth / 2)) + 'px';
+  };
+  const hide = () => {
+    if (current >= 0 && bars[current]) bars[current].classList.remove('active');
+    current = -1;
+    tip.hidden = true;
+  };
+  chart.addEventListener('pointermove', e => show(Math.floor((e.clientX - chart.getBoundingClientRect().left) / slot)));
+  chart.addEventListener('pointerdown', e => show(Math.floor((e.clientX - chart.getBoundingClientRect().left) / slot)));
+  chart.addEventListener('pointerleave', hide);
+  chart.addEventListener('blur', hide);
+  chart.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      show(current < 0 ? 0 : current + (e.key === 'ArrowRight' ? 1 : -1));
+    } else if (e.key === 'Escape') hide();
+  });
+  wrap.append(tip, chart);
+  return wrap;
+}
+
+function renderRecapCharts(box, a) {
+  const today = todayIso();
+  const year = viewMonth.slice(0, 4);
+  box.append(el('h3', null, 'Charts'));
+  const toggle = el('div', 'mode recap-range');
+  toggle.setAttribute('role', 'group');
+  toggle.setAttribute('aria-label', 'Chart period');
+  for (const [id, label] of [['month', fmt(viewMonth, { month: 'long' })], ['year', year]]) {
+    const b = el('button', null, label);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(recapRange === id));
+    b.addEventListener('click', () => { recapRange = id; renderMonthRecap(analyse()); });
+    toggle.append(b);
+  }
+  box.append(toggle);
+
+  const width = Math.max(220, box.clientWidth - 32);
+  const days = rangeDays(recapRange);
+  const months = recapRange === 'year' ? Array.from({ length: 12 }, (_, i) => addMonths(days[0], i)) : null;
+  const columns = months || days;
+  const table = [];
+  let shown = 0;
+  for (const def of RECAP_CHARTS) {
+    const c = chartSeries(def);
+    if (!c) continue;
+    const t = chartTotals(c, days);
+    if (!t.hit) continue;
+    shown++;
+    let points, max, topLabel, cells;
+    if (months) {
+      // One column per month: the total for that month.
+      points = months.map(m => {
+        const mt = chartTotals(c, daysBetween(m, 1));
+        const name = fmt(m, { month: 'long' });
+        const tip = m > today ? `${name}: not yet` : !mt.logged ? `${name}: nothing logged`
+          : `${name}: ${c.total(mt.sum)}` + (c.amount ? ` over ${plural(mt.hit, 'day')}` : '') + ` · ${plural(mt.logged, 'day')} logged`;
+        return { label: name, value: mt.logged ? mt.sum : null, tip, cell: mt.logged ? c.total(mt.sum) : '–' };
+      });
+      max = niceMax(Math.max(...points.map(p => p.value || 0)));
+      topLabel = c.total(max);
+    } else {
+      // One column per day: the level logged that day.
+      points = days.map(d => {
+        const v = d > today ? null : c.value(d);
+        const name = fmt(d, { weekday: 'short', day: 'numeric', month: 'short' });
+        return { label: name, value: v, tip: d > today ? `${name}: not yet` : `${name}: ${levelText(c, v)}`,
+          cell: d > today ? '' : v == null ? '–' : levelText(c, v) };
+      });
+      max = c.levels.length;
+      topLabel = c.key === 'sick' ? '' : c.levels[max - 1];
+    }
+    cells = points.map(p => p.cell);
+    table.push({ title: `${c.emoji} ${c.title}`, cells });
+
+    const head = el('div', 'chart-head');
+    let summary = c.total(t.sum) + (c.amount ? ` over ${plural(t.hit, 'day')}` : '');
+    if (c.key === 'sleep') summary = c.total(t.hit);
+    head.append(el('span', 'chart-title', `${c.emoji} ${c.title}`), el('span', 'chart-total', summary));
+    const ticks = months
+      ? months.map((m, i) => [i, fmt(m, { month: 'narrow' })])
+      : [0, 7, 14, 21, 28].filter(i => i < days.length).map(i => [i, String(i + 1)]);
+    const title = `${c.title}, ${months ? `per month in ${year}` : `per day in ${fmt(viewMonth, { month: 'long', year: 'numeric' })}`}: ${summary}`;
+    box.append(head, barChart(points, max, topLabel, ticks, width, title));
+  }
+  if (!shown) {
+    box.append(el('p', 'muted small', `Nothing to chart for ${recapRange === 'year' ? year : 'this month'} yet. Log alcohol, meetings, caffeine, sleep and more from the Habits and Sleep cards.`));
+    return;
+  }
+  box.append(el('p', 'muted small', recapRange === 'year'
+    ? 'Totals per month. Drinks and cups add up (5+ counts as 5); other habits count days. Tap a column for details.'
+    : 'Each column is a day: taller means more. Days with nothing logged are left empty. Tap a column for details.'));
+
+  // Every charted value, for reading without the charts.
+  const details = el('details', 'chart-table');
+  details.append(el('summary', 'small', 'See the numbers'));
+  const tbl = el('table');
+  const hr = el('tr');
+  hr.append(el('th', null, recapRange === 'year' ? 'Month' : 'Day'));
+  for (const col of table) hr.append(el('th', null, col.title));
+  tbl.append(hr);
+  columns.forEach((col, i) => {
+    if (col > today) return;
+    const tr = el('tr');
+    tr.append(el('td', null, months ? fmt(col, { month: 'short' }) : fmt(col, { weekday: 'short', day: 'numeric' })));
+    for (const t of table) tr.append(el('td', null, t.cells[i]));
+    tbl.append(tr);
+  });
+  const scroll = el('div', 'table-scroll');
+  scroll.append(tbl);
+  details.append(scroll);
+  box.append(details);
+
+  const insights = recapInsights(recapRange, a);
+  if (insights.length) {
+    box.append(el('h3', null, 'Insights'));
+    const list = el('ul', 'findings');
+    for (const l of insights) list.append(el('li', null, l));
+    box.append(list, el('p', 'muted small', `Counted over ${recapRange === 'year' ? year : 'this month'}. Patterns in your own data, not proof of cause.`));
+  }
 }
 
 function renderHistory(a) {
@@ -1268,6 +1592,12 @@ function init() {
 
   $('prev').addEventListener('click', () => { viewMonth = addMonths(viewMonth, -1); render(); });
   $('next').addEventListener('click', () => { viewMonth = addMonths(viewMonth, 1); render(); });
+  // Charts are drawn to the card's width, so redraw them when it changes.
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (!$('app').hidden) renderMonthRecap(analyse()); }, 150);
+  });
   $('export').addEventListener('click', exportBackup);
   $('import').addEventListener('change', e => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ''; });
   $('set-pass').addEventListener('click', setPassphrase);
