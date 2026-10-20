@@ -56,6 +56,7 @@ const HABITS = [
     levels: ['some', 'a lot', 'all day'], heavy: { level: 2, label: 'a lot or all day' } },
   { id: 'social', emoji: '👯', label: 'Social time', group: 'mind' },
   { id: 'alone', emoji: '🛋️', label: 'Alone time', group: 'mind' },
+  { id: 'sick', emoji: '🤒', label: 'Sick', group: 'body' },
   { id: 'cramps', emoji: '😖', label: 'Cramps', group: 'body', levels: ['mild', 'strong'] },
   { id: 'headache', emoji: '🤕', label: 'Headache', group: 'body' },
   { id: 'digestion', emoji: '🤢', label: 'Digestion issues', group: 'body' },
@@ -63,6 +64,11 @@ const HABITS = [
 const HABIT_MIN_SPAN = 60;   // ~2 months of habit logging before showing links
 const HABIT_MIN_DAYS = 8;    // days with and without a habit needed to compare them
 const HABIT_SHOW = 6;        // most findings listed per section
+// Monthly recap: moods that make a day feel good or tough ('tired' is neither).
+const GOOD_MOODS = ['happy', 'calm'];
+const TOUGH_MOODS = ['sad', 'irritable', 'anxious'];
+const RECAP_MIN_MOOD_DAYS = 3;  // mood days needed to describe a month
+const RECAP_COMPARE_DAYS = 5;   // mood days needed in both months to compare them
 
 // days: sorted ISO dates ('YYYY-MM-DD') marked as period days
 // moods: { 'YYYY-MM-DD': [moodId, ...] } (several moods per day allowed)
@@ -382,6 +388,113 @@ function habitInsights(a) {
   return status;
 }
 
+// ---------- monthly recap ----------
+
+// The phase most of `days` fall in, if one clearly dominates (at least half of them).
+function mainPhase(days, a) {
+  if (!a.last || days.length < 2) return null;
+  const count = {};
+  for (const d of days) {
+    const cd = cycleDayOf(d, a.ps);
+    if (cd) { const ph = phaseOf(cd, a); count[ph] = (count[ph] || 0) + 1; }
+  }
+  const best = PHASES.map(p => ({ p, n: count[p.id] || 0 })).sort((x, y) => y.n - x.n)[0];
+  return best.n >= 2 && best.n >= days.length / 2 ? best.p : null;
+}
+
+// Everything logged in one calendar month, up to today.
+function monthStats(month, a) {
+  const today = todayIso();
+  const end = addDays(addMonths(month, 1), -1);
+  const last = end < today ? end : today;
+  const days = [];
+  for (let d = month; d <= last; d = addDays(d, 1)) days.push(d);
+  const inMonth = d => d >= month && d <= last;
+
+  const moodDays = days.filter(d => state.moods[d]);
+  const moodCount = {};
+  for (const d of moodDays) for (const m of state.moods[d]) moodCount[m] = (moodCount[m] || 0) + 1;
+  const has = (d, ids) => state.moods[d].some(m => ids.includes(m));
+  const good = moodDays.filter(d => has(d, GOOD_MOODS) && !has(d, TOUGH_MOODS));
+  const tough = moodDays.filter(d => has(d, TOUGH_MOODS) && !has(d, GOOD_MOODS));
+
+  // Sleep tracking starts at the first bad night ever logged; unlogged nights count as normal.
+  const firstSleep = Object.keys(state.sleep).sort()[0];
+  const sleepNights = firstSleep ? days.filter(d => d >= firstSleep).length : 0;
+  const bad = days.filter(d => state.sleep[d]);
+
+  // Sick days count only once habit logging has started, so the comparison is fair.
+  const firstHabit = Object.keys(state.habits).sort()[0];
+  const habitDays = days.filter(d => state.habits[d]);
+  const habitCount = {};
+  for (const d of habitDays) for (const id of Object.keys(state.habits[d])) habitCount[id] = (habitCount[id] || 0) + 1;
+
+  return {
+    month, days: days.length, complete: end < today,
+    moodDays, moodCount, good, tough,
+    sleepNights, bad, insomnia: bad.filter(d => state.sleep[d] === 'insomnia').length,
+    habitTracked: firstHabit ? days.filter(d => d >= firstHabit).length : 0,
+    habitDays: habitDays.length, habitCount,
+    periods: a.ps.map((p, i) => ({ ...p, i })).filter(p => inMonth(p.start)),
+  };
+}
+
+// 'good' | 'mixed' | 'tough', from the balance of good and tough mood days.
+function monthTone(s) {
+  if (s.moodDays.length < RECAP_MIN_MOOD_DAYS) return null;
+  const balance = (s.good.length - s.tough.length) / s.moodDays.length;
+  return balance >= 0.3 ? 'good' : balance <= -0.3 ? 'tough' : 'mixed';
+}
+
+// How a period start compared with what its own past cycles predicted.
+function periodRecap(p, a) {
+  const length = diffDays(p.start, p.end) + 1;
+  const ongoing = p.end >= addDays(todayIso(), -1) && p.i === a.ps.length - 1;
+  const out = { start: p.start, length, ongoing, cycle: null, avg: null, shift: null };
+  if (p.i > 0) {
+    out.cycle = diffDays(a.ps[p.i - 1].start, p.start);
+    const before = a.cycles.slice(0, p.i - 1).filter(c => c >= 15 && c <= 60).slice(-HISTORY_WINDOW);
+    if (before.length && out.cycle >= 15 && out.cycle <= 60) {
+      out.avg = average(before, DEFAULT_CYCLE);
+      out.shift = out.cycle - out.avg; // > 0: late, < 0: early
+    }
+  }
+  return out;
+}
+
+// Short lines comparing a month with the one before it.
+function compareMonths(s, prev) {
+  const lines = [];
+  const name = fmt(prev.month, { month: 'long' });
+  const soFar = s.complete ? '' : ' so far';
+  if (s.moodDays.length >= RECAP_COMPARE_DAYS && prev.moodDays.length >= RECAP_COMPARE_DAYS) {
+    const share = (st, id) => (st.moodCount[id] || 0) / st.moodDays.length;
+    const changes = MOODS.map(m => ({ m, now: share(s, m.id), before: share(prev, m.id) }))
+      .filter(c => Math.abs(c.now - c.before) >= 0.15)
+      .sort((x, y) => Math.abs(y.now - y.before) - Math.abs(x.now - x.before))
+      .slice(0, 2);
+    for (const c of changes) {
+      lines.push(`${c.m.emoji} ${c.now > c.before ? 'More' : 'Fewer'} ${c.m.label.toLowerCase()} days than in ${name}${soFar} ` +
+        `(${Math.round(100 * c.now)}% of logged days vs ${Math.round(100 * c.before)}%).`);
+    }
+  }
+  // Rates per night, so a month that is still going compares fairly.
+  if (s.sleepNights >= 7 && prev.sleepNights >= 7) {
+    const now = s.bad.length / s.sleepNights, before = prev.bad.length / prev.sleepNights;
+    if (Math.abs(now - before) >= 0.1) {
+      lines.push(`${now < before ? '😴 Slept better' : '🦉 Slept worse'} than in ${name}${soFar} ` +
+        `(${plural(s.bad.length, 'bad night')} in ${s.sleepNights} vs ${prev.bad.length} in ${prev.sleepNights}).`);
+    }
+  }
+  if (s.habitTracked >= 7 && prev.habitTracked >= 7) {
+    const now = s.habitCount.sick || 0, before = prev.habitCount.sick || 0;
+    if (now !== before && (now >= 2 || before >= 2)) {
+      lines.push(`🤒 ${now > before ? 'More' : 'Fewer'} sick days than in ${name}${soFar} (${now} vs ${before}).`);
+    }
+  }
+  return lines;
+}
+
 // ---------- persistence ----------
 
 async function save() {
@@ -495,6 +608,7 @@ function render() {
   renderSleep(a);
   renderHabits(a);
   renderCalendar(a);
+  renderMonthRecap(a);
   renderHistory(a);
   const locked = !!cryptoKey;
   $('set-pass').textContent = locked ? 'Change passphrase' : 'Set passphrase';
@@ -809,9 +923,11 @@ function renderCalendar(a) {
     b.type = 'button';
     b.append(el('span', null, String(Number(d.slice(8)))));
     const dayMoods = (state.moods[d] || []).map(id => MOOD_BY_ID[id]);
-    if (dayMoods.length) {
+    const sick = !!(state.habits[d] && state.habits[d].sick);
+    const marks = [...(sick ? ['🤒'] : []), ...dayMoods.map(m => m.emoji)];
+    if (marks.length) {
       // Room for two emoji in a calendar cell; '+' hints at more.
-      b.append(el('span', 'mood-mark', dayMoods.slice(0, 2).map(m => m.emoji).join('') + (dayMoods.length > 2 ? '+' : '')));
+      b.append(el('span', 'mood-mark', marks.slice(0, 2).join('') + (marks.length > 2 ? '+' : '')));
     }
     if (marked.has(d)) b.classList.add('period');
     else if (predicted.has(d)) b.classList.add('predicted');
@@ -822,10 +938,104 @@ function renderCalendar(a) {
     if (d > today) b.classList.add('future');
     b.setAttribute('aria-label', fmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) +
       (marked.has(d) ? ', period' : '') + (dayMoods.length ? `, mood ${dayMoods.map(m => m.label).join(', ')}` : '') +
-      (state.sleep[d] ? `, ${SLEEP_BY_ID[state.sleep[d]].label.toLowerCase()}` : ''));
+      (state.sleep[d] ? `, ${SLEEP_BY_ID[state.sleep[d]].label.toLowerCase()}` : '') + (sick ? ', sick' : ''));
     if (tapMode === 'period') b.setAttribute('aria-pressed', String(marked.has(d)));
     b.addEventListener('click', () => (tapMode === 'period' ? toggleDay(d) : openMoodDialog(d)));
     grid.append(b);
+  }
+}
+
+function renderMonthRecap(a) {
+  const box = $('month-recap');
+  box.replaceChildren();
+  const today = todayIso();
+  const s = monthStats(viewMonth, a);
+  const soFar = !s.complete && viewMonth <= today ? ' so far' : '';
+  box.append(el('h2', null, `${fmt(viewMonth, { month: 'long', year: 'numeric' })} recap${soFar}`));
+  if (viewMonth > today) {
+    box.append(el('p', 'muted small', 'This month hasn’t started yet.'));
+    return;
+  }
+  const section = title => box.append(el('h3', null, title));
+
+  // Mood
+  section('Mood');
+  const tone = monthTone(s);
+  if (!tone) {
+    box.append(el('p', 'muted small', s.moodDays.length
+      ? `Only ${plural(s.moodDays.length, 'day')} with a mood logged. Log a few more to see how the month felt.`
+      : 'No moods logged this month.'));
+  } else {
+    const label = { good: '🌤️ Mostly a good month', mixed: '⛅ A mixed month', tough: '🌧️ A tough month' }[tone];
+    box.append(el('p', 'recap-tone', label));
+    const top = Object.entries(s.moodCount).sort((x, y) => y[1] - x[1]).slice(0, 3);
+    const chips = el('div', 'recap-moods');
+    for (const [id, n] of top) chips.append(el('span', 'chip', `${MOOD_BY_ID[id].emoji} ${MOOD_BY_ID[id].label} · ${plural(n, 'day')}`));
+    box.append(chips);
+    const parts = [`${plural(s.good.length, 'good day')}, ${plural(s.tough.length, 'tough day')} out of ${s.moodDays.length} logged.`];
+    const ph = s.tough.length >= 3 && mainPhase(s.tough, a);
+    if (ph) parts.push(`Tough days were mostly ${ph.when}.`);
+    box.append(el('p', 'muted small', parts.join(' ')));
+  }
+
+  // Cycle
+  section('Cycle');
+  if (!s.periods.length) {
+    const expected = a.nextStart && a.nextStart >= viewMonth && a.nextStart < addMonths(viewMonth, 1) && !s.complete;
+    box.append(el('p', null, expected
+      ? `No period yet. Next one expected around ${fmt(a.nextStart, { weekday: 'short', day: 'numeric', month: 'short' })}.`
+      : 'No period started this month.'));
+  }
+  for (const p of s.periods.map(p => periodRecap(p, a))) {
+    const lines = [`🩸 Period started ${fmt(p.start, { weekday: 'short', day: 'numeric', month: 'short' })}, ` +
+      (p.ongoing ? `day ${diffDays(p.start, today) + 1} so far.` : `lasted ${plural(p.length, 'day')}.`)];
+    if (p.cycle != null) {
+      let line = `Cycle before it: ${plural(p.cycle, 'day')}`;
+      if (p.shift != null) {
+        line += ` (your average was ${p.avg}). ` + (Math.abs(p.shift) <= 1 ? 'Right on time.'
+          : `Came ${plural(Math.abs(p.shift), 'day')} ${p.shift > 0 ? 'later' : 'earlier'} than expected.`);
+      } else line += '.';
+      lines.push(line);
+    }
+    for (const l of lines) box.append(el('p', null, l));
+  }
+
+  // Sleep
+  section('Sleep');
+  if (!s.bad.length) {
+    box.append(el('p', null, s.sleepNights ? 'No bad nights logged. 🌙' : 'No sleep logged.'));
+  } else {
+    const poor = s.bad.length - s.insomnia;
+    box.append(el('p', null, [s.insomnia && `${plural(s.insomnia, 'night')} of insomnia`, poor && plural(poor, 'poor night')]
+      .filter(Boolean).join(' · ')));
+    const ph = mainPhase(s.bad, a);
+    if (ph) box.append(el('p', 'muted small', `Most bad nights were ${ph.when}.`));
+  }
+
+  // What happened: sick days and the habits logged most often
+  section('What happened');
+  if (!s.habitDays) {
+    box.append(el('p', 'muted small', 'Nothing logged this month. Tap a day in “Mood, sleep & habits” mode to add what happened, like being sick.'));
+  } else {
+    const sick = s.habitCount.sick || 0;
+    box.append(el('p', null, sick ? `🤒 Sick ${plural(sick, 'day')}.` : 'No sick days logged.'));
+    const byId = Object.fromEntries(allHabits().map(h => [h.id, h]));
+    const top = Object.entries(s.habitCount).filter(([id]) => id !== 'sick' && byId[id])
+      .sort((x, y) => y[1] - x[1]).slice(0, 3);
+    if (top.length) {
+      box.append(el('p', 'muted small', 'Most logged: ' +
+        top.map(([id, n]) => `${byId[id].emoji} ${byId[id].label} (${plural(n, 'day')})`).join(', ') +
+        ` · ${plural(s.habitDays, 'day')} logged.`));
+    }
+  }
+
+  // Compared with the month before
+  const lines = compareMonths(s, monthStats(addMonths(viewMonth, -1), a));
+  if (lines.length) {
+    section(`Compared with ${fmt(addMonths(viewMonth, -1), { month: 'long' })}`);
+    const list = el('ul', 'findings');
+    for (const l of lines) list.append(el('li', null, l));
+    box.append(list);
   }
 }
 

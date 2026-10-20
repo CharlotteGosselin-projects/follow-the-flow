@@ -163,3 +163,10 @@ dialog h3 { margin: 12px 0 6px; }
 .findings { list-style: none; padding: 0; margin: 0; font-size: .9rem; }
 .findings li { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .findings li:last-child { border-bottom: none; }
+
+/* Monthly recap */
+#month-recap h3 { margin: 14px 0 4px; }
+#month-recap p { margin: 4px 0; }
+.recap-tone { font-size: 1.1rem; font-weight: 600; }
+.recap-moods { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.recap-moods .chip { font-size: .88rem; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
