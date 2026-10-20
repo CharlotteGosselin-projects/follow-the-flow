@@ -10,6 +10,7 @@
   --fertile: #d6ecf7;
   --ovulation: #7fbfe0;
   --sleep: #6f4fc2;
+  --chart: #b23a5b;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -24,6 +25,7 @@
     --fertile: #1f3a4a;
     --ovulation: #3f86ad;
     --sleep: #9278d4;
+    --chart: #dc6a8f;
   }
 }
 * { box-sizing: border-box; }
@@ -170,3 +172,25 @@ dialog h3 { margin: 12px 0 6px; }
 .recap-tone { font-size: 1.1rem; font-weight: 600; }
 .recap-moods { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .recap-moods .chip { font-size: .88rem; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+
+/* Recap charts */
+.recap-range { margin: 4px 0 8px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 12px 0 2px; }
+.chart-title { font-weight: 600; font-size: .92rem; }
+.chart-total { font-size: .85rem; color: var(--muted); text-align: right; }
+.chart { position: relative; }
+.chart svg { display: block; touch-action: pan-y; }
+.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.chart-bar { fill: var(--chart); }
+.chart-bar.active { opacity: .7; }
+.chart-grid, .chart-axis { stroke: var(--border); stroke-width: 1; }
+.chart-label { fill: var(--muted); font-size: 10px; }
+.chart-label.tick { text-anchor: middle; font-variant-numeric: tabular-nums; }
+.chart-tip {
+  position: absolute; top: -2px; z-index: 1; pointer-events: none; white-space: nowrap;
+  background: var(--text); color: var(--bg); font-size: .78rem; padding: 3px 8px; border-radius: 6px;
+}
+.chart-table summary { cursor: pointer; color: var(--accent); margin: 8px 0; }
+.table-scroll { overflow-x: auto; }
+.chart-table table { font-size: .8rem; font-variant-numeric: tabular-nums; }
+.chart-table th, .chart-table td { white-space: nowrap; }
