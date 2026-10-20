@@ -1,11 +1,14 @@
 // Makes the app work offline. Network-first for the app's own files so updates
 // arrive when online, falling back to the cache when offline. It never talks to
 // any other server, and no user data passes through it.
-const CACHE = 'ftf-v10';
+const CACHE = 'ftf-v11';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // 'reload' skips the browser's HTTP cache, so the offline copy never mixes old and new files.
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

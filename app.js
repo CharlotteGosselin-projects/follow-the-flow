@@ -602,14 +602,11 @@ function el(tag, cls, text) {
 
 function render() {
   const a = analyse();
-  renderReminder();
-  renderSummary(a);
-  renderMood(a);
-  renderSleep(a);
-  renderHabits(a);
-  renderCalendar(a);
-  renderMonthRecap(a);
-  renderHistory(a);
+  // Each card renders on its own, so a problem in one never leaves the others empty.
+  for (const part of [renderReminder, renderSummary, renderMood, renderSleep, renderHabits,
+    renderCalendar, renderMonthRecap, renderHistory]) {
+    try { part(a); } catch (e) { console.error(e); }
+  }
   const locked = !!cryptoKey;
   $('set-pass').textContent = locked ? 'Change passphrase' : 'Set passphrase';
   $('remove-pass').hidden = !locked;
@@ -947,6 +944,7 @@ function renderCalendar(a) {
 
 function renderMonthRecap(a) {
   const box = $('month-recap');
+  if (!box) return; // an older cached page without the recap card
   box.replaceChildren();
   const today = todayIso();
   const s = monthStats(viewMonth, a);
