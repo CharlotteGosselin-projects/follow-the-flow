@@ -29,30 +29,13 @@ function contentSecurityPolicy(): Plugin {
   };
 }
 
-// Until the switch-over, the new app's page is app.html so the current index.html keeps
-// serving the live app from the repo root. The build still publishes it as index.html.
-function publishAsIndex(): Plugin {
-  return {
-    name: 'publish-as-index',
-    apply: 'build',
-    enforce: 'post',
-    generateBundle(_options, bundle) {
-      const page = bundle['app.html'];
-      if (page) page.fileName = 'index.html';
-    },
-  };
-}
-
 export default defineConfig({
   // Relative paths, so the app works from any folder (GitHub Pages serves it under /follow-the-flow/).
   base: './',
-  server: { open: '/app.html' },
-  build: { rollupOptions: { input: 'app.html' } },
   plugins: [
     react(),
     tailwindcss(),
     contentSecurityPolicy(),
-    publishAsIndex(),
     // Offline support: precaches the app's own files. It never contacts any other host.
     VitePWA({
       filename: 'sw.js', // same name as the previous worker, so it replaces it in place
