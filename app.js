@@ -525,6 +525,13 @@ function daysBetween(from, months) {
   return out;
 }
 
+// Whether anything was logged for a day: habits, a mood or a bad night. If so, a habit
+// left untapped that day counts as "none". Period days alone don't count, since they're
+// often filled in afterwards without logging anything else.
+function usedApp(d) {
+  return !!(state.habits[d] || state.moods[d] || state.sleep[d]);
+}
+
 // One chart's daily values: a number for a logged day (0 = logged, not this habit),
 // null for a day with nothing logged.
 function chartSeries(c) {
@@ -541,7 +548,7 @@ function chartSeries(c) {
   if (!h || state.hiddenHabits.includes(h.id)) return null;
   return {
     key: h.id, emoji: h.emoji, title: h.label, levels: h.levels || ['yes'], amount: c.amount || null, heavy: h.heavy,
-    value: d => (state.habits[d] && d <= today ? state.habits[d][h.id] || 0 : null),
+    value: d => (d <= today && usedApp(d) ? (state.habits[d] || {})[h.id] || 0 : null),
     total: n => plural(n, c.amount || 'day'),
   };
 }
