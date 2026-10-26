@@ -1,0 +1,121 @@
+@import 'tailwindcss';
+
+/* Colour tokens. Each becomes a utility (bg-card, text-muted, border-line…) and a CSS variable. */
+@theme {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-bg: #fbf7f8;
+  --color-card: #ffffff;
+  --color-ink: #2a1f24;
+  --color-muted: #7a6a71;
+  --color-line: #eadde2;
+  --color-accent: #b23a5b;
+  --color-period: #d64b6f;
+  --color-predicted: #f6c9d5;
+  --color-fertile: #d6ecf7;
+  --color-ovulation: #7fbfe0;
+  --color-sleep: #6f4fc2;
+  /* Chart lines, by colour slot: checked as a set for colour-blind separation in both themes. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #17121a;
+    --color-card: #221a25;
+    --color-ink: #f2e9ee;
+    --color-muted: #a8959f;
+    --color-line: #3a2e3d;
+    --color-accent: #e7769a;
+    --color-predicted: #5c2c3d;
+    --color-fertile: #1f3a4a;
+    --color-ovulation: #3f86ad;
+    --color-sleep: #9278d4;
+    --color-series-1: #3987e5;
+    --color-series-2: #d95926;
+    --color-series-3: #199e70;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-bg font-sans text-base/[1.45] text-ink;
+  }
+  h1 {
+    @apply text-[1.35rem] font-bold;
+  }
+  h2 {
+    @apply mb-3 text-[1.1rem] font-bold;
+  }
+  h3 {
+    @apply mt-4 mb-2 text-[.95rem] font-bold;
+  }
+  table {
+    @apply w-full border-collapse text-[.92rem];
+  }
+  th,
+  td {
+    @apply border-b border-line px-1 py-1.5 text-left;
+  }
+  th {
+    @apply text-[.8rem] font-medium text-muted;
+  }
+  button,
+  summary {
+    @apply cursor-pointer;
+  }
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.4);
+  }
+}
+
+/* Calendar days. Plain classes because the states combine and use pseudo-elements. */
+@layer components {
+  /* The bottom padding reserves a strip for mood emoji, so day numbers stay aligned. */
+  .cell {
+    @apply relative flex aspect-square min-w-0 items-center justify-center rounded-full border-2 border-transparent p-0 pb-[11px] text-[.9rem]/[1.1];
+  }
+  .cell.future {
+    @apply text-muted;
+  }
+  .cell.fertile {
+    @apply bg-fertile text-ink;
+  }
+  .cell.ovulation {
+    @apply bg-ovulation text-white;
+  }
+  .cell.predicted {
+    @apply border-dashed border-period bg-predicted text-ink;
+  }
+  .cell.period {
+    @apply bg-period font-semibold text-white;
+  }
+  .cell.today {
+    @apply border-solid border-ink;
+  }
+  /* Sleep: a corner marker. Filled = insomnia, ring = poor sleep, so they differ by shape too. */
+  .cell.sleep-insomnia::after,
+  .cell.sleep-poor::after {
+    content: '';
+    @apply absolute top-0.5 right-0.5 size-[9px] rounded-full;
+    box-shadow: 0 0 0 2px var(--color-card);
+  }
+  .cell.sleep-insomnia::after {
+    @apply bg-sleep;
+  }
+  .cell.sleep-poor::after {
+    @apply border-2 border-sleep bg-card;
+  }
+
+  /* Chart line colours: `s1`–`s3` set --series for everything drawn in that slot. */
+  .s1 {
+    --series: var(--color-series-1);
+  }
+  .s2 {
+    --series: var(--color-series-2);
+  }
+  .s3 {
+    --series: var(--color-series-3);
+  }
+}

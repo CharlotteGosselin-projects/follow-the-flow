@@ -4,24 +4,39 @@
   "type": "module",
   "description": "A menstrual cycle tracker that never sends anything over the network.",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "check:urls": "node scripts/check-no-urls.mjs dist"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.0",
+    "@tailwindcss/vite": "4.3.3",
     "@types/node": "22.18.13",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
     "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",
     "prettier": "3.9.10",
+    "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "8.3.4",
+    "vite-plugin-pwa": "2.0.0",
     "vitest": "5.0.5"
   }
 }

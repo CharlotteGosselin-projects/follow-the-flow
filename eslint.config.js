@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -7,6 +8,7 @@ export default tseslint.config(
   { ignores: ['node_modules', 'dist', 'test-results', 'playwright-report', 'app.js', 'sw.js'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  { files: ['src/**/*.tsx'], ...reactHooks.configs.flat.recommended },
   {
     // The app must never talk to a network: these APIs are banned outright in app code.
     files: ['src/**/*.{ts,tsx}'],
@@ -37,7 +39,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['tests/**/*.ts', '*.config.{js,ts}'],
+    files: ['tests/**/*.ts', 'scripts/**/*.mjs', '*.config.{js,ts}'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 );

@@ -11,6 +11,12 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same end-to-end tests must pass on the current app and on the React rewrite.
+        app: [current, react]
+    name: check (${{ matrix.app }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,11 +28,15 @@ jobs:
       - run: npm run typecheck
       - run: npm run format:check
       - run: npm test
+      - run: npm run build
+      - run: npm run check:urls
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+        env:
+          APP: ${{ matrix.app }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.app }}
           path: test-results/
           retention-days: 7

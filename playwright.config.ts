@@ -1,9 +1,14 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // End-to-end tests drive the real app in Chromium.
-// APP_CMD serves the app under test on PORT (today: the static files in the repo root).
+// APP=react tests the built React app (run `npm run build` first); otherwise the current
+// app is served straight from the repo root. Both must pass the same tests.
 // PW_CHROMIUM_PATH points at a preinstalled Chromium when downloading one isn't possible.
 const PORT = Number(process.env.PORT || 4173);
+const SERVE =
+  process.env.APP === 'react'
+    ? `npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort`
+    : `python3 -m http.server ${PORT} --bind 127.0.0.1`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -23,7 +28,7 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 900 } } },
   ],
   webServer: {
-    command: process.env.APP_CMD || `python3 -m http.server ${PORT} --bind 127.0.0.1`,
+    command: SERVE,
     url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: !process.env.CI,
   },

@@ -31,14 +31,16 @@ test('the chart picker shows up to 3 lines and keeps colours stable', async ({ p
     picker(page).evaluateAll((bs) =>
       bs
         .filter((b) => b.getAttribute('aria-pressed') === 'true')
-        .map((b) => `${b.children[1]!.textContent!.replace(/^\S+\s/, '')}:${b.className.match(/s\d/)![0]}`),
+        .map(
+          (b) => `${b.children[1]!.textContent!.replace(/^\S+\s/, '')}:${b.className.match(/\bs\d\b/)![0]}`,
+        ),
     );
   expect(await pressed()).toEqual(['Alcohol:s1', 'Meetings:s2']);
-  // Lines with gaps are drawn in pieces, so count the colours drawn.
+  // Lines with gaps are drawn in pieces, so count the colour slots drawn.
   const drawn = await recap(page)
     .locator('.chart-line')
-    .evaluateAll((ls) => [...new Set(ls.map((l) => l.getAttribute('class')))]);
-  expect(drawn.sort()).toEqual(['chart-line s1', 'chart-line s2']);
+    .evaluateAll((ls) => [...new Set(ls.map((l) => l.getAttribute('class')!.match(/\bs\d\b/)![0]))]);
+  expect(drawn.sort()).toEqual(['s1', 's2']);
 
   await picker(page).filter({ hasText: 'Caffeine' }).click();
   expect(await pressed()).toEqual(['Alcohol:s1', 'Meetings:s2', 'Caffeine:s3']);
