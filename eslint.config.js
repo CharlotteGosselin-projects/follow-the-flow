@@ -4,8 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  // app.js / sw.js are the current app, replaced by src/ in a later step.
-  { ignores: ['node_modules', 'dist', 'test-results', 'playwright-report', 'app.js', 'sw.js'] },
+  { ignores: ['node_modules', 'dist', 'test-results', 'playwright-report'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { files: ['src/**/*.tsx'], ...reactHooks.configs.flat.recommended },

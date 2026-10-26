@@ -6,9 +6,10 @@ A private menstrual cycle tracker that runs entirely in your browser. **No data 
 
 "Sending no data" doesn't mean storing nothing. It means storing data **only on your device**:
 
-- **No backend.** It's just static files (HTML/CSS/JS). There's no account, analytics, cookies or third-party scripts.
+- **No backend.** It's just static files (HTML/CSS/JS). There's no account, analytics, cookies or third-party scripts; everything, including React, is bundled into the app's own files.
 - **The browser enforces it.** A Content-Security-Policy with `connect-src 'none'` blocks every network request from the page (fetch, XHR, WebSocket, beacons), so even a bug couldn't send your data.
-- **Local storage only.** Period days are saved in this browser's `localStorage`.
+- **Checked on every change.** Lint bans network APIs in the app's code, the build fails on any unexpected web address, and every end-to-end test fails if the app requests anything from another host.
+- **Local storage only.** Your data is saved in this browser's `localStorage`.
 - **Optional passphrase.** With a passphrase set, data is encrypted on the device (AES-GCM 256, PBKDF2-SHA256 key, 310k iterations). There's no recovery if you forget it.
 - **Works offline.** A service worker caches the app's own files, and the app can be installed to your home screen (PWA).
 - **Backups are files you own.** Export/Import creates and reads a JSON file (period days, moods, sleep and habits) on your device. Use it to move to another phone or keep a backup.
@@ -34,23 +35,40 @@ A private menstrual cycle tracker that runs entirely in your browser. **No data 
 
 Predictions are estimates. They are not medical advice and not a form of contraception.
 
-## Run it
+## Develop
 
-Any static file server works:
+The app is React + TypeScript + Tailwind, built with [Vite](https://vite.dev). You need Node 22.
 
 ```sh
-python3 -m http.server 8000
-# open http://localhost:8000
+npm install
+npm run dev        # dev server with hot reload
+npm test           # unit tests (Vitest, tests/unit)
+npm run build      # production build in dist/
+npm run e2e        # end-to-end tests (Playwright, tests/e2e) against the build
+npm run lint       # ESLint; npm run typecheck and npm run format:check too
 ```
+
+The first `npm run e2e` needs a browser: `npx playwright install chromium`.
+
+### Where things are
+
+| Path | What |
+|---|---|
+| `src/lib/` | All the logic as plain TypeScript, no React: dates, cycle maths and predictions (`cycle.ts`), mood forecast, sleep pattern, habit links, monthly recap, chart data, backups, encryption, and every data change (`actions.ts`). Every function takes its inputs, so each can be tested on its own. Thresholds live in `catalog.ts`. |
+| `src/store/` | `AppStore.tsx` holds the data, the passphrase lock and today's date, and saves every change; `storage.ts` is the only code that touches `localStorage`. |
+| `src/components/` | One component per card (Summary, Mood, Sleep, Habits, Calendar, monthly recap…), with shared bits in `ui/`. |
+| `tests/unit/` | Unit tests for `src/lib`. |
+| `tests/e2e/` | Browser tests on a fixed date that fail on any outside request or page error. |
+| `tests/fixtures/` | Test data, including a year of sample logs and data encrypted by an earlier version. |
+
+The stored format (`ftf:v1` in `localStorage`) and the backup file (version 5) are unchanged since earlier versions, so existing data keeps working. Change them only with a migration in `src/lib/backup.ts` (`sanitize`).
 
 ### Publish on GitHub Pages
 
 1. The repo must be **public** (or you need GitHub Pro for Pages on a private repo).
    Making the code public is safe: the code contains no personal data, and your data never leaves your device.
-2. **Settings → Pages → Build and deployment → Source: "Deploy from a branch"**, pick `master` and `/ (root)`, then **Save**.
-3. After a minute it's live at `https://<your-username>.github.io/follow-the-flow/`.
-4. On your phone, open that link and use **Add to Home Screen** to install it like an app. It then works offline.
+2. **Settings → Pages → Build and deployment → Source: "GitHub Actions"**.
+3. Every push to `master` runs `.github/workflows/deploy.yml`: unit tests, build, URL check and end-to-end tests, then it publishes `dist/`. Nothing is published if a test fails.
+4. It's live at `https://<your-username>.github.io/follow-the-flow/`. On your phone, open that link and use **Add to Home Screen** to install it like an app. It then works offline.
 
-Every push to `master` redeploys automatically.
-
-To use it on your phone, you can also host it on any static host (GitHub Pages, Netlify, Cloudflare Pages). The host only serves the files. It never sees your data, because the app never sends any.
+Any static host works too (Netlify, Cloudflare Pages…): publish the `dist/` folder. The host only serves the files. It never sees your data, because the app never sends any.
