@@ -1,0 +1,7 @@
+# The current app is replaced in a later step; keep its diff-free history until then.
+app.js
+style.css
+sw.js
+index.html
+README.md
+package-lock.json
