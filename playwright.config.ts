@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = Number(process.env.PORT || 4173);
 const SERVE =
   process.env.APP === 'react'
-    ? `npx vite preview --port ${PORT} --strictPort`
+    ? `npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort`
     : `python3 -m http.server ${PORT} --bind 127.0.0.1`;
 
 export default defineConfig({
