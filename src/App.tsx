@@ -72,7 +72,7 @@ function Tracker() {
         onMode={setMode}
         onTapDay={(d) => (mode === 'period' ? togglePeriod(d) : openDay(d))}
       />
-      <MonthRecap month={month} />
+      <MonthRecap month={month} onMonth={setMonth} />
       <History />
       <DataCard onExport={exportBackup} />
       <footer className="pt-2 pb-6 text-center text-[.85rem] text-muted">
