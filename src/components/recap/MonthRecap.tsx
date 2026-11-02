@@ -1,6 +1,6 @@
 import { MOOD_BY_ID } from '../../lib/catalog.ts';
 import { mainPhase } from '../../lib/cycle.ts';
-import { addMonths, diffDays, fmt } from '../../lib/dates.ts';
+import { addMonths, diffDays, fmt, startOfMonth } from '../../lib/dates.ts';
 import { allHabits } from '../../lib/habits.ts';
 import { compareMonths, monthStats, monthTone, periodRecap, type MonthStats } from '../../lib/recap.ts';
 import { plural } from '../../lib/text.ts';
@@ -13,8 +13,11 @@ import { RecapCharts } from './RecapCharts.tsx';
 const TONE = { good: '🌤️ Mostly a good month', mixed: '⛅ A mixed month', tough: '🌧️ A tough month' };
 const longDay = { weekday: 'short', day: 'numeric', month: 'short' } as const;
 
-/** A summary of the month shown in the calendar, live while it's still going. */
-export function MonthRecap({ month }: { month: string }) {
+/**
+ * A summary of the month shown in the calendar, live while it's still going. Its own arrows
+ * move the calendar too, so you can browse past months without scrolling back up.
+ */
+export function MonthRecap({ month, onMonth }: { month: string; onMonth: (m: string) => void }) {
   const { state, today, analysis } = useStore();
   const s = monthStats(state, analysis, month, today);
   const soFar = !s.complete && month <= today ? ' so far' : '';
@@ -23,9 +26,28 @@ export function MonthRecap({ month }: { month: string }) {
 
   return (
     <Card id="month-recap" className="[&_h3]:mt-3.5 [&_h3]:mb-1 [&_p]:my-1">
-      <h2>
-        {fmt(month, { month: 'long', year: 'numeric' })} recap{soFar}
-      </h2>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="m-0 flex-1">
+          {fmt(month, { month: 'long', year: 'numeric' })} recap{soFar}
+        </h2>
+        <button
+          id="recap-prev"
+          aria-label={`Previous month: ${fmt(prev, { month: 'long', year: 'numeric' })}`}
+          className="rounded-[10px] px-3 py-1 text-2xl/none"
+          onClick={() => onMonth(prev)}
+        >
+          ‹
+        </button>
+        <button
+          id="recap-next"
+          aria-label={`Next month: ${fmt(addMonths(month, 1), { month: 'long', year: 'numeric' })}`}
+          className="rounded-[10px] px-3 py-1 text-2xl/none disabled:opacity-30"
+          disabled={month >= startOfMonth(today)}
+          onClick={() => onMonth(addMonths(month, 1))}
+        >
+          ›
+        </button>
+      </div>
       {month > today ? (
         <Note>This month hasn’t started yet.</Note>
       ) : (

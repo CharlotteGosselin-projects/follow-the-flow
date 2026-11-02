@@ -25,6 +25,24 @@ test('the month recap describes mood, cycle, sleep and what happened', async ({ 
   await expect(recap(page)).toContainText('This month hasn’t started yet.');
 });
 
+test('the recap has its own arrows to browse past months, kept in step with the calendar', async ({
+  page,
+}) => {
+  await openWith(page, yearOfData());
+  await expect(recap(page).locator('#recap-next')).toBeDisabled(); // no recap for months to come
+  await recap(page).locator('#recap-prev').click();
+  await expect(recap(page).locator('h2')).toHaveText('September 2026 recap');
+  await expect(page.locator('#month-label')).toHaveText('September 2026');
+  await expect(recap(page).locator('.recap-range button').first()).toHaveText('September');
+  expect(await readout(page, 0, 30)).toMatch(/^Tue, Sep 1 \| /);
+  await recap(page).locator('#recap-prev').click();
+  await expect(recap(page).locator('h2')).toHaveText('August 2026 recap');
+  await recap(page).locator('#recap-next').click();
+  await recap(page).locator('#recap-next').click();
+  await expect(recap(page).locator('h2')).toHaveText('October 2026 recap so far');
+  await expect(recap(page).locator('#recap-next')).toBeDisabled();
+});
+
 test('the chart picker shows up to 3 lines and keeps colours stable', async ({ page }) => {
   await openWith(page, yearOfData());
   const pressed = () =>
